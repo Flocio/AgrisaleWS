@@ -14,6 +14,10 @@ import '../repositories/return_repository.dart';
 import '../repositories/income_repository.dart';
 import '../repositories/remittance_repository.dart';
 import '../repositories/settings_repository.dart';
+import '../repositories/workspace_repository.dart';
+import '../services/auth_service.dart';
+import '../database_helper.dart';
+import 'package:sqflite/sqflite.dart';
 import '../models/api_error.dart';
 import '../models/api_response.dart';
 import 'api_service.dart';
@@ -33,6 +37,8 @@ class AutoBackupService {
   final IncomeRepository _incomeRepo = IncomeRepository();
   final RemittanceRepository _remittanceRepo = RemittanceRepository();
   final SettingsRepository _settingsRepo = SettingsRepository();
+  final WorkspaceRepository _workspaceRepo = WorkspaceRepository();
+  final AuthService _authService = AuthService();
   final ApiService _apiService = ApiService();
 
   Timer? _autoBackupTimer;
@@ -437,12 +443,8 @@ class AutoBackupService {
     Directory baseDir;
     
     if (Platform.isAndroid) {
-      // Android: 使用外部存储
-      baseDir = Directory('/storage/emulated/0/Android/data/com.yikang.agrisalews/files');
-      if (!await baseDir.exists()) {
-        // 如果外部存储不可用，使用应用文档目录
-        baseDir = await getApplicationDocumentsDirectory();
-      }
+      // Android: 使用应用文档目录（更可靠，不需要特殊权限）
+      baseDir = await getApplicationDocumentsDirectory();
     } else if (Platform.isIOS) {
       // iOS: 使用 Documents 目录
       baseDir = await getApplicationDocumentsDirectory();
@@ -574,7 +576,7 @@ class AutoBackupService {
     }
   }
 
-  // 恢复备份（通过服务器 API 导入数据）
+  // 恢复备份（workspace级别，支持本地和云端workspace）
   Future<bool> restoreBackup(String filePath) async {
     try {
       final file = File(filePath);
@@ -583,12 +585,31 @@ class AutoBackupService {
         return false;
       }
 
+      // 获取当前workspace信息
+      final workspaceId = await _apiService.getWorkspaceId();
+      if (workspaceId == null) {
+        print('未选择workspace，无法恢复备份');
+        return false;
+      }
+
+      final workspace = await _apiService.getCurrentWorkspace();
+      if (workspace == null) {
+        print('无法获取workspace信息，无法恢复备份');
+        return false;
+      }
+
+      final storageType = workspace['storage_type'] as String? ?? workspace['storageType'] as String?;
       final jsonString = await file.readAsString();
       final Map<String, dynamic> backupData = jsonDecode(jsonString);
       
       // 验证数据格式
-      if (!backupData.containsKey('backupInfo') || !backupData.containsKey('data')) {
-        print('备份文件格式错误');
+      if (!backupData.containsKey('backupInfo') && !backupData.containsKey('exportInfo')) {
+        print('备份文件格式错误：缺少 backupInfo 或 exportInfo');
+        return false;
+      }
+
+      if (!backupData.containsKey('data')) {
+        print('备份文件格式错误：缺少 data');
         return false;
       }
 
@@ -596,24 +617,36 @@ class AutoBackupService {
       final Map<String, dynamic> importData;
       if (backupData.containsKey('backupInfo')) {
         // 自动备份格式：backupInfo -> exportInfo
+        final backupInfo = backupData['backupInfo'] as Map<String, dynamic>;
         importData = {
           'exportInfo': {
-            'username': backupData['backupInfo']['username'] ?? '未知',
-            'exportTime': backupData['backupInfo']['backupTime'] ?? DateTime.now().toIso8601String(),
-            'version': backupData['backupInfo']['version'] ?? (await PackageInfo.fromPlatform()).version,
+            'username': backupInfo['username'] ?? '未知',
+            'exportTime': backupInfo['backupTime'] ?? backupInfo['exportTime'] ?? DateTime.now().toIso8601String(),
+            'version': backupInfo['version'] ?? (await PackageInfo.fromPlatform()).version,
+            'workspaceName': backupInfo['workspaceName'],
+            'workspaceId': backupInfo['workspaceId'],
           },
           'data': backupData['data'],
         };
-      } else if (backupData.containsKey('exportInfo')) {
-        // 手动导出格式：直接使用
-        importData = backupData;
       } else {
-        print('备份文件格式错误：缺少 backupInfo 或 exportInfo');
-        return false;
+        // 手动导出格式：直接使用，但确保有workspace信息
+        importData = Map<String, dynamic>.from(backupData);
+        if (!importData['exportInfo'].containsKey('workspaceName')) {
+          importData['exportInfo']['workspaceName'] = workspace['name'];
+        }
+        if (!importData['exportInfo'].containsKey('workspaceId')) {
+          importData['exportInfo']['workspaceId'] = workspaceId;
+        }
       }
 
-      // 通过服务器 API 导入数据
-      await _settingsRepo.importData(importData);
+      // 根据workspace类型选择导入方式
+      if (storageType == 'server') {
+        // 服务器workspace：调用API导入
+        await _workspaceRepo.importWorkspaceData(workspaceId, importData);
+      } else {
+        // 本地workspace：直接操作本地数据库
+        await _importDataToLocal(workspaceId, importData['data'] as Map<String, dynamic>);
+      }
 
       print('恢复备份成功');
       return true;
@@ -624,5 +657,271 @@ class AutoBackupService {
       print('恢复备份失败: $e');
       return false;
     }
+  }
+
+  /// 导入数据到本地workspace（与workspace_data_management_screen中的逻辑一致）
+  Future<void> _importDataToLocal(int workspaceId, Map<String, dynamic> data) async {
+    final dbHelper = DatabaseHelper();
+    final db = await dbHelper.database;
+    final username = await _authService.getCurrentUsername();
+    
+    if (username == null) {
+      throw ApiError(message: '未登录');
+    }
+    
+    final userId = await dbHelper.getCurrentUserId(username);
+    if (userId == null) {
+      throw ApiError(message: '用户不存在');
+    }
+    
+    // 在事务中执行导入
+    await db.transaction((txn) async {
+      // 1. 删除该workspace的所有业务数据
+      await txn.delete('remittance', where: 'workspaceId = ?', whereArgs: [workspaceId]);
+      await txn.delete('income', where: 'workspaceId = ?', whereArgs: [workspaceId]);
+      await txn.delete('returns', where: 'workspaceId = ?', whereArgs: [workspaceId]);
+      await txn.delete('sales', where: 'workspaceId = ?', whereArgs: [workspaceId]);
+      await txn.delete('purchases', where: 'workspaceId = ?', whereArgs: [workspaceId]);
+      await txn.delete('products', where: 'workspaceId = ?', whereArgs: [workspaceId]);
+      await txn.delete('employees', where: 'workspaceId = ?', whereArgs: [workspaceId]);
+      await txn.delete('customers', where: 'workspaceId = ?', whereArgs: [workspaceId]);
+      await txn.delete('suppliers', where: 'workspaceId = ?', whereArgs: [workspaceId]);
+      
+      // 2. 创建ID映射表（旧ID -> 新ID）
+      final supplierIdMap = <int, int>{};
+      final customerIdMap = <int, int>{};
+      final employeeIdMap = <int, int>{};
+      final productIdMap = <int, int>{};
+      
+      // 3. 导入suppliers
+      final suppliers = (data['suppliers'] as List?) ?? [];
+      for (final supplierData in suppliers) {
+        final originalId = supplierData['id'] as int?;
+        final newId = await txn.insert('suppliers', {
+          'userId': userId,
+          'workspaceId': workspaceId,
+          'name': supplierData['name'] as String? ?? '',
+          'note': supplierData['note'] as String?,
+          'created_at': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toIso8601String(),
+        });
+        if (originalId != null) {
+          supplierIdMap[originalId] = newId;
+        }
+      }
+      
+      // 4. 导入customers
+      final customers = (data['customers'] as List?) ?? [];
+      for (final customerData in customers) {
+        final originalId = customerData['id'] as int?;
+        final newId = await txn.insert('customers', {
+          'userId': userId,
+          'workspaceId': workspaceId,
+          'name': customerData['name'] as String? ?? '',
+          'note': customerData['note'] as String?,
+          'created_at': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toIso8601String(),
+        });
+        if (originalId != null) {
+          customerIdMap[originalId] = newId;
+        }
+      }
+      
+      // 5. 导入employees
+      final employees = (data['employees'] as List?) ?? [];
+      for (final employeeData in employees) {
+        final originalId = employeeData['id'] as int?;
+        final newId = await txn.insert('employees', {
+          'userId': userId,
+          'workspaceId': workspaceId,
+          'name': employeeData['name'] as String? ?? '',
+          'note': employeeData['note'] as String?,
+          'created_at': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toIso8601String(),
+        });
+        if (originalId != null) {
+          employeeIdMap[originalId] = newId;
+        }
+      }
+      
+      // 6. 导入products
+      final products = (data['products'] as List?) ?? [];
+      for (final productData in products) {
+        final originalId = productData['id'] as int?;
+        // 处理supplierId映射
+        int? supplierId = productData['supplierId'] as int?;
+        if (supplierId == 0) {
+          supplierId = null;
+        } else if (supplierId != null && supplierIdMap.containsKey(supplierId)) {
+          supplierId = supplierIdMap[supplierId];
+        } else if (supplierId != null && !supplierIdMap.containsKey(supplierId)) {
+          supplierId = null; // 如果映射不存在，设为null
+        }
+        
+        // 处理unit
+        String unit = productData['unit'] as String? ?? '公斤';
+        if (unit != '斤' && unit != '公斤' && unit != '袋') {
+          unit = '公斤';
+        }
+        
+        final newId = await txn.insert('products', {
+          'userId': userId,
+          'workspaceId': workspaceId,
+          'name': productData['name'] as String? ?? '',
+          'description': productData['description'] as String?,
+          'stock': (productData['stock'] as num?)?.toDouble() ?? 0.0,
+          'unit': unit,
+          'supplierId': supplierId,
+          'version': 1,
+          'created_at': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toIso8601String(),
+        });
+        if (originalId != null) {
+          productIdMap[originalId] = newId;
+        }
+      }
+      
+      // 7. 导入purchases
+      final purchases = (data['purchases'] as List?) ?? [];
+      for (final purchaseData in purchases) {
+        int? supplierId = purchaseData['supplierId'] as int?;
+        if (supplierId == 0) {
+          supplierId = null;
+        } else if (supplierId != null && supplierIdMap.containsKey(supplierId)) {
+          supplierId = supplierIdMap[supplierId];
+        } else if (supplierId != null && !supplierIdMap.containsKey(supplierId)) {
+          supplierId = null;
+        }
+        
+        await txn.insert('purchases', {
+          'userId': userId,
+          'workspaceId': workspaceId,
+          'productName': purchaseData['productName'] as String? ?? '',
+          'quantity': (purchaseData['quantity'] as num?)?.toDouble() ?? 0.0,
+          'purchaseDate': purchaseData['purchaseDate'] as String?,
+          'supplierId': supplierId,
+          'totalPurchasePrice': (purchaseData['totalPurchasePrice'] as num?)?.toDouble(),
+          'note': purchaseData['note'] as String?,
+          'created_at': DateTime.now().toIso8601String(),
+        });
+      }
+      
+      // 8. 导入sales
+      final sales = (data['sales'] as List?) ?? [];
+      for (final saleData in sales) {
+        int? customerId = saleData['customerId'] as int?;
+        if (customerId != null && customerIdMap.containsKey(customerId)) {
+          customerId = customerIdMap[customerId];
+        } else if (customerId != null && !customerIdMap.containsKey(customerId)) {
+          customerId = null;
+        }
+        
+        await txn.insert('sales', {
+          'userId': userId,
+          'workspaceId': workspaceId,
+          'productName': saleData['productName'] as String? ?? '',
+          'quantity': (saleData['quantity'] as num?)?.toDouble() ?? 0.0,
+          'saleDate': saleData['saleDate'] as String?,
+          'customerId': customerId,
+          'totalSalePrice': (saleData['totalSalePrice'] as num?)?.toDouble(),
+          'note': saleData['note'] as String?,
+          'created_at': DateTime.now().toIso8601String(),
+        });
+      }
+      
+      // 9. 导入returns
+      final returns = (data['returns'] as List?) ?? [];
+      for (final returnData in returns) {
+        int? customerId = returnData['customerId'] as int?;
+        if (customerId != null && customerIdMap.containsKey(customerId)) {
+          customerId = customerIdMap[customerId];
+        } else if (customerId != null && !customerIdMap.containsKey(customerId)) {
+          customerId = null;
+        }
+        
+        await txn.insert('returns', {
+          'userId': userId,
+          'workspaceId': workspaceId,
+          'productName': returnData['productName'] as String? ?? '',
+          'quantity': (returnData['quantity'] as num?)?.toDouble() ?? 0.0,
+          'returnDate': returnData['returnDate'] as String?,
+          'customerId': customerId,
+          'totalReturnPrice': (returnData['totalReturnPrice'] as num?)?.toDouble(),
+          'note': returnData['note'] as String?,
+          'created_at': DateTime.now().toIso8601String(),
+        });
+      }
+      
+      // 10. 导入income
+      final income = (data['income'] as List?) ?? [];
+      for (final incomeData in income) {
+        int? customerId = incomeData['customerId'] as int?;
+        if (customerId != null && customerIdMap.containsKey(customerId)) {
+          customerId = customerIdMap[customerId];
+        } else if (customerId != null && !customerIdMap.containsKey(customerId)) {
+          customerId = null;
+        }
+        
+        int? employeeId = incomeData['employeeId'] as int?;
+        if (employeeId != null && employeeIdMap.containsKey(employeeId)) {
+          employeeId = employeeIdMap[employeeId];
+        } else if (employeeId != null && !employeeIdMap.containsKey(employeeId)) {
+          employeeId = null;
+        }
+        
+        String paymentMethod = incomeData['paymentMethod'] as String? ?? '现金';
+        if (paymentMethod != '现金' && paymentMethod != '银行卡' && paymentMethod != '微信转账' && paymentMethod != '支付宝') {
+          paymentMethod = '现金';
+        }
+        
+        await txn.insert('income', {
+          'userId': userId,
+          'workspaceId': workspaceId,
+          'incomeDate': incomeData['incomeDate'] as String?,
+          'customerId': customerId,
+          'amount': (incomeData['amount'] as num?)?.toDouble() ?? 0.0,
+          'discount': (incomeData['discount'] as num?)?.toDouble() ?? 0.0,
+          'employeeId': employeeId,
+          'paymentMethod': paymentMethod,
+          'note': incomeData['note'] as String?,
+          'created_at': DateTime.now().toIso8601String(),
+        });
+      }
+      
+      // 11. 导入remittance
+      final remittance = (data['remittance'] as List?) ?? [];
+      for (final remittanceData in remittance) {
+        int? supplierId = remittanceData['supplierId'] as int?;
+        if (supplierId != null && supplierIdMap.containsKey(supplierId)) {
+          supplierId = supplierIdMap[supplierId];
+        } else if (supplierId != null && !supplierIdMap.containsKey(supplierId)) {
+          supplierId = null;
+        }
+        
+        int? employeeId = remittanceData['employeeId'] as int?;
+        if (employeeId != null && employeeIdMap.containsKey(employeeId)) {
+          employeeId = employeeIdMap[employeeId];
+        } else if (employeeId != null && !employeeIdMap.containsKey(employeeId)) {
+          employeeId = null;
+        }
+        
+        String paymentMethod = remittanceData['paymentMethod'] as String? ?? '现金';
+        if (paymentMethod != '现金' && paymentMethod != '银行卡' && paymentMethod != '微信转账' && paymentMethod != '支付宝') {
+          paymentMethod = '现金';
+        }
+        
+        await txn.insert('remittance', {
+          'userId': userId,
+          'workspaceId': workspaceId,
+          'remittanceDate': remittanceData['remittanceDate'] as String?,
+          'supplierId': supplierId,
+          'amount': (remittanceData['amount'] as num?)?.toDouble() ?? 0.0,
+          'employeeId': employeeId,
+          'paymentMethod': paymentMethod,
+          'note': remittanceData['note'] as String?,
+          'created_at': DateTime.now().toIso8601String(),
+        });
+      }
+    });
   }
 }

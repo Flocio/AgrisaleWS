@@ -369,7 +369,7 @@ class _AutoBackupListScreenState extends State<AutoBackupListScreen> {
             context: context,
             builder: (context) => AlertDialog(
               title: Text('恢复成功'),
-              content: Text('数据已恢复！建议重启应用以确保数据完全加载。'),
+              content: Text('数据已恢复！'),
               actions: [
                 ElevatedButton(
                   onPressed: () {

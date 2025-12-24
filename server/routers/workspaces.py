@@ -990,9 +990,9 @@ async def import_workspace_data(
                 detail="本地 Workspace 的数据导入应在客户端执行"
             )
         
-        # 检查 manage_settings 权限（只有 owner 和 admin 可以导入）
-        can_manage = await check_workspace_permission(workspace_id, user_id, 'manage_settings')
-        if not can_manage:
+        # 检查角色权限（只有 owner 和 admin 可以导入数据）
+        role = await get_workspace_role(workspace_id, user_id)
+        if role not in ['owner', 'admin']:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="只有 Workspace 拥有者和管理员可以导入数据"

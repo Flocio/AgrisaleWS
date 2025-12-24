@@ -278,18 +278,20 @@ async def import_data(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    批量导入数据（覆盖模式）
+    批量导入数据（覆盖模式）- 已废弃
     
-    删除当前用户的所有业务数据，然后导入新数据。
-    注意：不会影响用户设置（user_settings）。
+    注意：此API已废弃，因为它会跨workspace影响数据，不符合workspace数据隔离原则。
+    请使用 /api/workspaces/{workspace_id}/import-data 进行workspace级别的数据导入。
     
-    Args:
-        import_request: 导入数据请求
-        current_user: 当前用户信息
-    
-    Returns:
-        导入结果统计
+    此API保留仅用于向后兼容，但会返回错误提示。
     """
+    # 此API已废弃，因为它会跨workspace影响数据
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="此API已废弃。请使用 /api/workspaces/{workspace_id}/import-data 进行workspace级别的数据导入，以确保数据隔离。每个workspace的数据必须完全独立，互不干扰。"
+    )
+    
+    # 以下代码已废弃，不会执行
     pool = get_pool()
     user_id = current_user["user_id"]
     

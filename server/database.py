@@ -128,11 +128,11 @@ class SQLiteConnectionPool:
                     # 首次创建数据库
                     logger.info("首次创建数据库，执行初始化脚本...")
                     self._create_tables(conn)
-                    self._set_version(conn, 18)
+                    self._set_version(conn, 19)
                 else:
                     # 升级数据库
                     logger.info(f"数据库版本: {version}, 检查是否需要升级...")
-                    self._upgrade_database(conn, version, 18)
+                    self._upgrade_database(conn, version, 19)
                     # 无论版本如何，都检查并修复 user_settings 表的列（兼容性修复）
                     self._ensure_user_settings_columns(conn)
         except Exception as e:
@@ -220,7 +220,7 @@ class SQLiteConnectionPool:
                 FOREIGN KEY (userId) REFERENCES users (id) ON DELETE CASCADE,
                 FOREIGN KEY (workspaceId) REFERENCES workspaces (id) ON DELETE CASCADE,
                 FOREIGN KEY (supplierId) REFERENCES suppliers (id) ON DELETE SET NULL,
-                UNIQUE(userId, name)
+                UNIQUE(workspaceId, name)
             )
         ''')
         
@@ -236,7 +236,7 @@ class SQLiteConnectionPool:
                 updated_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY (userId) REFERENCES users (id) ON DELETE CASCADE,
                 FOREIGN KEY (workspaceId) REFERENCES workspaces (id) ON DELETE CASCADE,
-                UNIQUE(userId, name)
+                UNIQUE(workspaceId, name)
             )
         ''')
         
@@ -252,7 +252,7 @@ class SQLiteConnectionPool:
                 updated_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY (userId) REFERENCES users (id) ON DELETE CASCADE,
                 FOREIGN KEY (workspaceId) REFERENCES workspaces (id) ON DELETE CASCADE,
-                UNIQUE(userId, name)
+                UNIQUE(workspaceId, name)
             )
         ''')
         
@@ -268,7 +268,7 @@ class SQLiteConnectionPool:
                 updated_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY (userId) REFERENCES users (id) ON DELETE CASCADE,
                 FOREIGN KEY (workspaceId) REFERENCES workspaces (id) ON DELETE CASCADE,
-                UNIQUE(userId, name)
+                UNIQUE(workspaceId, name)
             )
         ''')
         
@@ -828,6 +828,121 @@ class SQLiteConnectionPool:
                 logger.info("升级到版本 18 完成：Workspace 支持已添加")
             except Exception as e:
                 logger.error(f"升级到版本 18 失败: {e}", exc_info=True)
+                conn.rollback()
+                raise
+        
+        # 版本 19: 修改唯一性约束从 UNIQUE(userId, name) 改为 UNIQUE(workspaceId, name)
+        if old_version < 19:
+            logger.info("升级到版本 19: 修改唯一性约束为 workspace 级别")
+            try:
+                # 需要修改的表：products, suppliers, customers, employees
+                tables_to_migrate = [
+                    ('products', 'supplierId'),
+                    ('suppliers', None),
+                    ('customers', None),
+                    ('employees', None)
+                ]
+                
+                for table_name, fk_column in tables_to_migrate:
+                    logger.info(f"迁移 {table_name} 表的唯一性约束...")
+                    
+                    # 检查是否有workspaceId为NULL的数据
+                    cursor = conn.execute(f"SELECT COUNT(*) FROM {table_name} WHERE workspaceId IS NULL")
+                    null_count = cursor.fetchone()[0]
+                    
+                    if null_count > 0:
+                        logger.warning(f"{table_name} 表中有 {null_count} 条记录的 workspaceId 为 NULL，这些记录将保留但不再允许新创建")
+                    
+                    # 创建新表（带新的唯一性约束）
+                    if table_name == 'products':
+                        conn.execute(f'''
+                            CREATE TABLE {table_name}_new (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                userId INTEGER NOT NULL,
+                                workspaceId INTEGER,
+                                name TEXT NOT NULL,
+                                description TEXT,
+                                stock REAL DEFAULT 0,
+                                unit TEXT NOT NULL CHECK(unit IN ('斤', '公斤', '袋')),
+                                supplierId INTEGER,
+                                version INTEGER DEFAULT 1,
+                                created_at TEXT DEFAULT (datetime('now')),
+                                updated_at TEXT DEFAULT (datetime('now')),
+                                FOREIGN KEY (userId) REFERENCES users (id) ON DELETE CASCADE,
+                                FOREIGN KEY (workspaceId) REFERENCES workspaces (id) ON DELETE CASCADE,
+                                FOREIGN KEY (supplierId) REFERENCES suppliers (id) ON DELETE SET NULL,
+                                UNIQUE(workspaceId, name)
+                            )
+                        ''')
+                    elif table_name == 'suppliers':
+                        conn.execute(f'''
+                            CREATE TABLE {table_name}_new (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                userId INTEGER NOT NULL,
+                                workspaceId INTEGER,
+                                name TEXT NOT NULL,
+                                note TEXT,
+                                created_at TEXT DEFAULT (datetime('now')),
+                                updated_at TEXT DEFAULT (datetime('now')),
+                                FOREIGN KEY (userId) REFERENCES users (id) ON DELETE CASCADE,
+                                FOREIGN KEY (workspaceId) REFERENCES workspaces (id) ON DELETE CASCADE,
+                                UNIQUE(workspaceId, name)
+                            )
+                        ''')
+                    elif table_name == 'customers':
+                        conn.execute(f'''
+                            CREATE TABLE {table_name}_new (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                userId INTEGER NOT NULL,
+                                workspaceId INTEGER,
+                                name TEXT NOT NULL,
+                                note TEXT,
+                                created_at TEXT DEFAULT (datetime('now')),
+                                updated_at TEXT DEFAULT (datetime('now')),
+                                FOREIGN KEY (userId) REFERENCES users (id) ON DELETE CASCADE,
+                                FOREIGN KEY (workspaceId) REFERENCES workspaces (id) ON DELETE CASCADE,
+                                UNIQUE(workspaceId, name)
+                            )
+                        ''')
+                    elif table_name == 'employees':
+                        conn.execute(f'''
+                            CREATE TABLE {table_name}_new (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                userId INTEGER NOT NULL,
+                                workspaceId INTEGER,
+                                name TEXT NOT NULL,
+                                note TEXT,
+                                created_at TEXT DEFAULT (datetime('now')),
+                                updated_at TEXT DEFAULT (datetime('now')),
+                                FOREIGN KEY (userId) REFERENCES users (id) ON DELETE CASCADE,
+                                FOREIGN KEY (workspaceId) REFERENCES workspaces (id) ON DELETE CASCADE,
+                                UNIQUE(workspaceId, name)
+                            )
+                        ''')
+                    
+                    # 迁移数据：只迁移workspaceId不为NULL的数据
+                    # workspaceId为NULL的旧数据将被删除（不符合新的业务逻辑：每个workspace数据完全独立）
+                    conn.execute(f'''
+                        INSERT INTO {table_name}_new 
+                        SELECT * FROM {table_name}
+                        WHERE workspaceId IS NOT NULL
+                    ''')
+                    
+                    if null_count > 0:
+                        logger.warning(f"{table_name} 表中有 {null_count} 条记录的 workspaceId 为 NULL，这些记录将被删除（不符合新的业务逻辑）")
+                    
+                    # 删除旧表
+                    conn.execute(f'DROP TABLE {table_name}')
+                    
+                    # 重命名新表
+                    conn.execute(f'ALTER TABLE {table_name}_new RENAME TO {table_name}')
+                    
+                    logger.info(f"{table_name} 表迁移完成")
+                
+                conn.commit()
+                logger.info("升级到版本 19 完成：唯一性约束已改为 workspace 级别")
+            except Exception as e:
+                logger.error(f"升级到版本 19 失败: {e}", exc_info=True)
                 conn.rollback()
                 raise
         
