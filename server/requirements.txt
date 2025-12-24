@@ -1,0 +1,22 @@
+# AgrisaleWS服务器端依赖
+
+# Web 框架
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+
+# 数据验证
+pydantic>=2.0.0
+
+# 认证
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+bcrypt<4.0.0  # bcrypt 4.0+ 与 passlib 1.7.4 不兼容，使用 3.x 版本
+python-multipart>=0.0.9
+
+# 数据库
+# SQLite 是 Python 标准库，无需安装
+
+# 工具
+python-dotenv>=1.0.0
+
+

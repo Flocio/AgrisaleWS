@@ -1,0 +1,14 @@
+# Android Release 签名配置示例
+# 
+# 使用方法：
+# 1. 复制此文件为 key.properties
+# 2. 填写实际的签名信息
+# 3. 将 key.properties 添加到 .gitignore（已添加）
+# 
+# 注意：此文件包含敏感信息，不要提交到 Git 仓库
+
+storePassword=你的store密码
+keyPassword=你的key密码
+keyAlias=agrisalews
+storeFile=agrisale-release.jks
+

@@ -1,0 +1,513 @@
+name: Multi-Platform Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  FLUTTER_VERSION: "3.24.0"
+  VERSION_TAG: "v1.0.0"
+
+jobs:
+  # iOS 构建
+  build-ios:
+    name: iOS Build
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: 'stable'
+          architecture: x64
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Update CocoaPods
+        run: pod repo update
+        working-directory: ios
+
+      - name: Build iOS Release
+        run: flutter build ios --release --no-codesign
+
+      - name: Create IPA
+        run: |
+          mkdir Payload
+          mv Runner.app/ Payload
+          zip -qq -r -9 AgrisaleWS-ios-${{ env.VERSION_TAG }}.ipa Payload
+        working-directory: build/ios/iphoneos
+
+      - name: Upload iOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: iOS-Build
+          path: build/ios/iphoneos/AgrisaleWS-ios-${{ env.VERSION_TAG }}.ipa
+
+  # Android 构建
+  build-android:
+    name: Android Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: 'stable'
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Clean Build
+        run: flutter clean
+
+      - name: Get Dependencies Again
+        run: flutter pub get
+
+      - name: Fix share_plus build.gradle
+        run: |
+          python3 << 'PYEOF'
+          import os
+          import re
+          
+          # 修复 share_plus 插件的 build.gradle 文件
+          share_plus_build_gradle = os.path.join(os.path.expanduser('~'), '.pub-cache', 'hosted', 'pub.dev', 'share_plus-12.0.1', 'android', 'build.gradle')
+          if os.path.isfile(share_plus_build_gradle):
+              print(f'找到 share_plus build.gradle: {share_plus_build_gradle}')
+              with open(share_plus_build_gradle, 'r', encoding='utf-8') as f:
+                  content = f.read()
+              
+              # 修复 compileSdk = flutter.compileSdkVersion 为 compileSdk = 35
+              if 'compileSdk = flutter.compileSdkVersion' in content:
+                  new_content = content.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 35')
+                  with open(share_plus_build_gradle, 'w', encoding='utf-8') as f:
+                      f.write(new_content)
+                  print('✓ 已修复 share_plus compileSdk 配置')
+              elif 'compileSdk flutter.compileSdkVersion' in content:
+                  new_content = content.replace('compileSdk flutter.compileSdkVersion', 'compileSdk 35')
+                  with open(share_plus_build_gradle, 'w', encoding='utf-8') as f:
+                      f.write(new_content)
+                  print('✓ 已修复 share_plus compileSdk 配置')
+              elif 'compileSdkVersion flutter.compileSdkVersion' in content:
+                  new_content = content.replace('compileSdkVersion flutter.compileSdkVersion', 'compileSdkVersion 35')
+                  with open(share_plus_build_gradle, 'w', encoding='utf-8') as f:
+                      f.write(new_content)
+                  print('✓ 已修复 share_plus compileSdkVersion 配置')
+              else:
+                  print('✓ share_plus build.gradle 中未发现需要修复的 compileSdk 配置')
+          else:
+              print(f'警告: 未找到 share_plus build.gradle: {share_plus_build_gradle}')
+          PYEOF
+
+      - name: Fix install_plugin namespace and AndroidManifest
+        run: |
+          python3 << 'PYEOF'
+          import re
+          import os
+          
+          home = os.environ.get('HOME', os.path.expanduser('~'))
+          
+          # 修复 build.gradle - 添加 namespace 和统一 JVM 目标版本
+          build_gradle_path = os.path.join(home, '.pub-cache', 'hosted', 'pub.dev', 'install_plugin-2.1.0', 'android', 'build.gradle')
+          if os.path.isfile(build_gradle_path):
+              print(f'找到 build.gradle: {build_gradle_path}')
+              with open(build_gradle_path, 'r', encoding='utf-8') as f:
+                  content = f.read()
+              
+              has_changes = False
+              
+              # 添加 namespace
+              if 'namespace' not in content:
+                  pattern = r'(android\s*\{)'
+                  replacement = r'\1\n    namespace "com.crazecoder.openfile"'
+                  content = re.sub(pattern, replacement, content, count=1)
+                  has_changes = True
+                  print('✓ 已添加 namespace 到 build.gradle')
+              else:
+                  print('✓ build.gradle 已包含 namespace')
+              
+              # 修复 compileSdkVersion - 确保至少为 30（Java 9+ 要求），最好设置为 35
+              if 'compileSdkVersion' in content:
+                  # 检查当前的 compileSdkVersion 值
+                  match = re.search(r'compileSdkVersion\s+(\d+)', content)
+                  if match:
+                      current_sdk = int(match.group(1))
+                      if current_sdk < 35:
+                          content = re.sub(r'compileSdkVersion\s+\d+', 'compileSdkVersion 35', content)
+                          has_changes = True
+                          print(f'✓ 已更新 compileSdkVersion 从 {current_sdk} 到 35')
+                      else:
+                          print(f'✓ compileSdkVersion 已设置为 {current_sdk}')
+                  else:
+                      # 如果格式不同，尝试替换
+                      content = re.sub(r'compileSdkVersion\s*[^\n]+', 'compileSdkVersion 35', content)
+                      has_changes = True
+                      print('✓ 已设置 compileSdkVersion 为 35')
+              else:
+                  # 如果没有 compileSdkVersion，添加它（在 namespace 之后）
+                  if 'namespace' in content:
+                      pattern = r'(namespace\s+"[^"]+"\s*\n)'
+                      replacement = r'\1    compileSdkVersion 35\n'
+                      content = re.sub(pattern, replacement, content, count=1)
+                      has_changes = True
+                      print('✓ 已添加 compileSdkVersion 35')
+                  elif 'android {' in content:
+                      pattern = r'(android\s*\{)'
+                      replacement = r'\1\n    compileSdkVersion 35'
+                      content = re.sub(pattern, replacement, content, count=1)
+                      has_changes = True
+                      print('✓ 已添加 compileSdkVersion 35')
+              
+              # 统一 JVM 目标版本为 11（与项目配置一致）
+              # 修复 compileOptions - 将 Java 1.8 改为 11
+              if 'VERSION_1_8' in content:
+                  content = re.sub(r'VERSION_1_8', 'VERSION_11', content)
+                  has_changes = True
+                  print('✓ 已更新 Java 版本从 1.8 到 11')
+              
+              # 修复 kotlinOptions - 将 jvmTarget 1.8 改为 11
+              if 'jvmTarget' in content:
+                  # 匹配 jvmTarget = "1.8" 或 jvmTarget = '1.8'
+                  content = re.sub(r'jvmTarget\s*=\s*["\']1\.8["\']', 'jvmTarget = "11"', content)
+                  if 'jvmTarget = "11"' in content or "jvmTarget = '11'" in content:
+                      print('✓ kotlinOptions jvmTarget 已设置为 11')
+                  else:
+                      has_changes = True
+                      print('✓ 已更新 kotlinOptions jvmTarget 到 11')
+              
+              # 如果没有 compileOptions，添加它
+              if 'compileOptions' not in content and 'android {' in content:
+                  # 在 android { 后添加 compileOptions
+                  pattern = r'(android\s*\{)'
+                  replacement = r'\1\n    compileOptions {\n        sourceCompatibility JavaVersion.VERSION_11\n        targetCompatibility JavaVersion.VERSION_11\n    }'
+                  content = re.sub(pattern, replacement, content, count=1)
+                  has_changes = True
+                  print('✓ 已添加 compileOptions 配置')
+              
+              # 如果没有 kotlinOptions，添加它
+              if 'kotlinOptions' not in content and 'compileOptions' in content:
+                  # 在 compileOptions 后添加 kotlinOptions
+                  pattern = r'(compileOptions\s*\{[^\}]*?\})'
+                  replacement = r'\1\n    kotlinOptions {\n        jvmTarget = "11"\n    }'
+                  content = re.sub(pattern, replacement, content, count=1)
+                  has_changes = True
+                  print('✓ 已添加 kotlinOptions 配置')
+              
+              if has_changes:
+                  with open(build_gradle_path, 'w', encoding='utf-8') as f:
+                      f.write(content)
+                  print('✓ build.gradle 修复完成')
+          else:
+              print(f'警告: 未找到 build.gradle: {build_gradle_path}')
+          
+          # 修复 AndroidManifest.xml - 移除 package 属性
+          manifest_path = os.path.join(home, '.pub-cache', 'hosted', 'pub.dev', 'install_plugin-2.1.0', 'android', 'src', 'main', 'AndroidManifest.xml')
+          if os.path.isfile(manifest_path):
+              print(f'找到 AndroidManifest.xml: {manifest_path}')
+              with open(manifest_path, 'r', encoding='utf-8') as f:
+                  content = f.read()
+              
+              # 移除 package 属性
+              if 'package=' in content:
+                  # 匹配 package="..." 或 package='...'
+                  pattern = r'\s*package\s*=\s*["\'][^"\']*["\']'
+                  new_content = re.sub(pattern, '', content)
+                  
+                  with open(manifest_path, 'w', encoding='utf-8') as f:
+                      f.write(new_content)
+                  print('✓ 已移除 AndroidManifest.xml 中的 package 属性')
+              else:
+                  print('✓ AndroidManifest.xml 中已无 package 属性')
+          else:
+              print(f'警告: 未找到 AndroidManifest.xml: {manifest_path}')
+          PYEOF
+
+      - name: Restore Android keystore
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > android/app/agrisale-release.jks
+          chmod 600 android/app/agrisale-release.jks
+
+      - name: Verify keystore and alias
+        run: |
+          echo "=== 验证恢复的 keystore ==="
+          if [ ! -f "android/app/agrisale-release.jks" ]; then
+            echo "❌ Keystore 文件不存在"
+            exit 1
+          fi
+          echo "✅ Keystore 文件存在"
+          echo ""
+          echo "=== 检查 keystore 中的 alias ==="
+          keytool -list -keystore android/app/agrisale-release.jks -storepass "${{ secrets.ANDROID_STORE_PASSWORD }}" 2>&1 | grep -E "agrisale|Alias name" || echo "❌ 无法列出 alias（可能是密码错误）"
+          echo ""
+          echo "=== 配置的 alias (来自 Secret) ==="
+          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}"
+          echo ""
+          echo "=== 验证 alias 是否匹配 ==="
+          KEYSTORE_ALIAS=$(keytool -list -keystore android/app/agrisale-release.jks -storepass "${{ secrets.ANDROID_STORE_PASSWORD }}" 2>&1 | grep -oP "agrisale\w*" | head -1)
+          SECRET_ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}"
+          if [ "$KEYSTORE_ALIAS" = "$SECRET_ALIAS" ]; then
+            echo "✅ Alias 匹配: $KEYSTORE_ALIAS"
+          else
+            echo "❌ Alias 不匹配！"
+            echo "   Keystore 中的 alias: $KEYSTORE_ALIAS"
+            echo "   Secret 中的 alias: $SECRET_ALIAS"
+            exit 1
+          fi
+
+      - name: Create key.properties
+        run: |
+          echo "storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}" > android/key.properties
+          echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> android/key.properties
+          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> android/key.properties
+          echo "storeFile=agrisale-release.jks" >> android/key.properties
+          echo ""
+          echo "=== 生成的 key.properties 内容 ==="
+          cat android/key.properties
+
+      - name: Build Android APK
+        run: flutter build apk --release
+
+      - name: Rename APK File
+        run: |
+          mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/AgrisaleWS-android-${{ env.VERSION_TAG }}.apk
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Android-APK
+          path: build/app/outputs/flutter-apk/AgrisaleWS-android-${{ env.VERSION_TAG }}.apk
+
+  # macOS 构建
+  build-macos:
+    name: macOS Build
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: 'stable'
+          architecture: x64
+
+      - name: Enable macOS Desktop
+        run: flutter config --enable-macos-desktop
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Update CocoaPods
+        run: pod repo update
+        working-directory: macos
+
+      - name: Build macOS Release
+        run: flutter build macos --release
+
+      - name: Create macOS Archive
+        run: |
+          cd build/macos/Build/Products/Release
+          zip -qq -r -9 ../../../../../AgrisaleWS-macos-${{ env.VERSION_TAG }}.zip AgrisaleWS.app
+
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macOS-Build
+          path: AgrisaleWS-macos-${{ env.VERSION_TAG }}.zip
+
+  # Windows 构建
+  build-windows:
+    name: Windows Build
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: 'stable'
+
+      - name: Enable Windows Desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Build Windows Release
+        run: flutter build windows --release
+
+      - name: Create Windows Archive
+        run: |
+          Compress-Archive -Path "build\windows\x64\runner\Release\*" -DestinationPath "AgrisaleWS-windows-${{ env.VERSION_TAG }}.zip"
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-Build
+          path: AgrisaleWS-windows-${{ env.VERSION_TAG }}.zip
+
+  # 创建 GitHub Release
+  create-release:
+    name: Create Release
+    needs: [build-ios, build-android, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -la artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.VERSION_TAG }}
+          name: "AgrisaleWS ${{ env.VERSION_TAG }}"
+          body: |
+            ## AgrisaleWS ${{ env.VERSION_TAG }}
+            
+            ### 支持平台
+            - iOS: iPhone 和 iPad
+            - Android: 手机和平板
+            - macOS: Mac 桌面应用
+            - Windows: Windows 桌面应用
+            
+            ### v1.0.0 首个正式版本 🎉
+            
+            **AgrisaleWS** 是一款功能强大的农资管理系统，支持多平台使用，提供完整的业务管理和数据分析功能。
+            
+            #### 核心功能
+            
+            **🏢 Workspace 工作空间管理**
+            - 支持创建多个独立的工作空间（Workspace），实现业务数据隔离
+            - 本地 Workspace：数据存储在本地设备，隐私性强
+            - 云端 Workspace：数据存储在服务器，支持多设备访问和团队协作
+            - 灵活的成员管理和角色权限系统（拥有者、管理员、编辑者、查看者）
+            
+            **📊 业务数据管理**
+            - 产品管理：产品信息、库存管理、供应商关联
+            - 客户管理：客户信息、销售记录、进账统计
+            - 供应商管理：供应商信息、采购记录、汇款统计
+            - 员工管理：员工信息、经手人记录
+            - 采购管理：采购记录、库存自动更新、供应商关联
+            - 销售管理：销售记录、库存检查、客户关联
+            - 退货管理：退货记录、库存恢复
+            - 进账管理：收款记录、优惠计算、支付方式
+            - 汇款管理：付款记录、供应商关联
+            
+            **📈 数据统计与分析**
+            - 基础统计：库存统计、采购统计、销售统计、退货统计
+            - 综合分析：销售汇总、销售与进账分析、采购与汇款分析、财务统计
+            - 智能分析：数据仪表盘、AI 数据分析助手（支持 DeepSeek）
+            - 可视化图表：趋势图、对比图、占比图、多维度数据展示
+            - 数据导出：支持 CSV 和 PDF 格式导出
+            
+            **💾 数据管理与备份**
+            - Workspace 级别的数据导入导出（JSON 格式）
+            - 自动备份系统：支持定时备份、启动/退出时备份
+            - 备份管理：查看、恢复、删除备份文件
+            - 数据迁移：支持跨 Workspace 数据导入
+            - 兼容旧版本数据格式
+            
+            **📝 审计日志**
+            - 完整记录所有操作（创建、修改、删除）
+            - Workspace 级别的日志隔离
+            - 多维度筛选：按操作类型、实体类型、时间范围、操作人
+            - 详细的变更记录：显示修改前后的数据对比
+            - 操作追溯：查看谁、何时、做了什么
+            
+            **👥 团队协作**
+            - 成员邀请：通过用户名邀请成员加入云端 Workspace
+            - 角色权限：四种角色（拥有者、管理员、编辑者、查看者）
+            - 实时权限检查：动态验证用户权限
+            - 成员管理：修改角色、移除成员
+            - 所有权转移：删除账户时自动转移 Workspace 所有权
+            
+            **⚙️ 系统设置**
+            - 账户管理：修改密码、在线设备管理、退出登录、注销账户
+            - AI 模型配置：DeepSeek API 设置、模型参数调整
+            - 服务器配置：自定义服务器地址、连接测试、快速配置
+            - 在线设备：设备上线/下线通知、在线设备数量显示
+            - 帮助文档：完整的使用指南和常见问题解答
+            
+            #### UI/UX 特性
+            - 🎨 现代化设计：简洁美观的界面，符合 Material Design 规范
+            - 🏷️ 彩色标识：角色权限、存储类型、操作类型等都有独特的颜色标识
+            - 🔄 轮转式筛选：快速切换不同的筛选条件
+            - ⚡ 并行加载：多个数据源同时加载，提升性能
+            - 📱 响应式设计：适配各种屏幕尺寸
+            - 🕐 UTC+8 时区：统一使用中国标准时间显示
+            
+            #### 安全特性
+            - 🔒 密码验证：重要操作（删除 Workspace、注销账户）需要密码确认
+            - 🔐 权限控制：基于角色的访问控制（RBAC）
+            - 📊 审计追踪：完整的操作日志记录
+            - 💾 数据隔离：Workspace 级别的数据和日志隔离
+            - 🔄 自动备份：防止数据丢失
+            
+            #### 技术亮点
+            - Flutter 跨平台框架，原生性能体验
+            - SQLite 本地数据库，支持离线使用
+            - RESTful API 后端服务
+            - JWT 身份认证
+            - 实时心跳机制
+            - 数据库事务保证一致性
+            
+            
+            ### 📥 下载说明
+            - **iOS 用户**: 下载 `AgrisaleWS-ios-${{ env.VERSION_TAG }}.ipa` 文件
+            - **Android 用户**: 下载 `AgrisaleWS-android-${{ env.VERSION_TAG }}.apk` 文件
+            - **macOS 用户**: 下载 `AgrisaleWS-macos-${{ env.VERSION_TAG }}.zip` 文件
+            - **Windows 用户**: 下载 `AgrisaleWS-windows-${{ env.VERSION_TAG }}.zip` 文件
+            
+            ### 📲 安装说明
+            - **iOS**: 需要使用第三方工具如 AltStore 或企业证书安装
+            - **Android**: 开启"未知来源应用"后直接安装 APK
+            - **macOS**: 解压后拖拽到应用程序文件夹，首次打开可能需要在"系统偏好设置-安全性与隐私"中允许
+            - **Windows**: 解压后运行 AgrisaleWS.exe
+            
+            ### 🚀 快速开始
+            1. 注册账号或登录
+            2. 创建您的第一个 Workspace（选择本地或云端）
+            3. 添加产品、客户、供应商等基础数据
+            4. 开始记录采购、销售等业务数据
+            5. 查看统计报表和数据分析
+            
+            ### 📚 使用帮助
+            - 详细的帮助文档：应用内"个人中心" → "设置" → "关于" → "查看帮助"
+            - 涵盖所有功能的完整使用指南
+            - 常见问题解答和使用技巧
+            
+            ---
+            
+            ✨ **完整跨平台支持** | 🎯 **原生用户体验** | 💼 **专业业务管理** | 🆓 **开源免费**
+          files: |
+            artifacts/iOS-Build/AgrisaleWS-ios-${{ env.VERSION_TAG }}.ipa
+            artifacts/Android-APK/AgrisaleWS-android-${{ env.VERSION_TAG }}.apk
+            artifacts/macOS-Build/AgrisaleWS-macos-${{ env.VERSION_TAG }}.zip
+            artifacts/Windows-Build/AgrisaleWS-windows-${{ env.VERSION_TAG }}.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
