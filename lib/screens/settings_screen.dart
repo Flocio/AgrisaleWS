@@ -56,11 +56,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       final settings = await _settingsRepo.getUserSettings();
       if (mounted) {
-        setState(() {
-          _showOnlineUsers = settings.isShowOnlineUsers;
+      setState(() {
+        _showOnlineUsers = settings.isShowOnlineUsers;
           _notifyDeviceOnline = settings.isNotifyDeviceOnline;
           _notifyDeviceOffline = settings.isNotifyDeviceOffline;
-        });
+      });
       }
     } on ApiError catch (e) {
       if (mounted) {

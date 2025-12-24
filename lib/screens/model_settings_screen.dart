@@ -1,6 +1,7 @@
 // lib/screens/model_settings_screen.dart
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../repositories/settings_repository.dart';
 import '../models/api_error.dart';
 import '../utils/snackbar_helper.dart';
@@ -20,7 +21,6 @@ class _ModelSettingsScreenState extends State<ModelSettingsScreen> {
   String _apiKey = '';
   final _apiKeyController = TextEditingController();
   bool _obscureApiKey = true;
-  bool _isLoading = true; // 添加加载状态
   
   final List<String> _availableModels = [
     'deepseek-chat',
@@ -31,7 +31,7 @@ class _ModelSettingsScreenState extends State<ModelSettingsScreen> {
   @override
   void initState() {
     super.initState();
-    _loadModelSettings();
+    _loadModelSettings(); // 从本地加载，不需要加载状态
   }
 
   @override
@@ -41,38 +41,31 @@ class _ModelSettingsScreenState extends State<ModelSettingsScreen> {
   }
 
   Future<void> _loadModelSettings() async {
-    setState(() {
-      _isLoading = true; // 开始加载
-    });
+    // 从本地存储读取模型设置，不需要加载转圈圈
+    final prefs = await SharedPreferences.getInstance();
     
-    try {
-      final settings = await _settingsRepo.getUserSettings();
-      setState(() {
-        _temperature = settings.deepseekTemperature;
-        _maxTokens = settings.deepseekMaxTokens;
-        _selectedModel = settings.deepseekModel;
-        _apiKey = settings.deepseekApiKey ?? '';
-        _apiKeyController.text = _apiKey;
-        _isLoading = false; // 加载完成
-      });
-    } on ApiError catch (e) {
-      setState(() {
-        _isLoading = false; // 即使失败也要停止加载状态
-      });
-      if (mounted) {
-        context.showErrorSnackBar('加载设置失败: ${e.message}');
-      }
-    } catch (e) {
-      setState(() {
-        _isLoading = false; // 即使失败也要停止加载状态
-      });
-      if (mounted) {
-        context.showErrorSnackBar('加载设置失败: ${e.toString()}');
-      }
-    }
+    setState(() {
+      _temperature = prefs.getDouble('deepseek_temperature') ?? 0.7;
+      _maxTokens = prefs.getInt('deepseek_max_tokens') ?? 2000;
+      _selectedModel = prefs.getString('deepseek_model') ?? 'deepseek-chat';
+      _apiKey = prefs.getString('deepseek_api_key') ?? '';
+      _apiKeyController.text = _apiKey;
+    });
   }
 
   Future<bool> _saveSettings() async {
+    // 先保存到本地存储（立即生效）
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('deepseek_temperature', _temperature);
+    await prefs.setInt('deepseek_max_tokens', _maxTokens);
+    await prefs.setString('deepseek_model', _selectedModel);
+    if (_apiKeyController.text.trim().isEmpty) {
+      await prefs.remove('deepseek_api_key');
+    } else {
+      await prefs.setString('deepseek_api_key', _apiKeyController.text.trim());
+    }
+    
+    // 然后异步同步到服务器（不阻塞UI）
     try {
       await _settingsRepo.updateUserSettings(
         UserSettingsUpdate(
@@ -86,37 +79,25 @@ class _ModelSettingsScreenState extends State<ModelSettingsScreen> {
       );
       return true; // 保存成功
     } on ApiError catch (e) {
-      if (mounted) {
-        context.showErrorSnackBar('保存设置失败: ${e.message}');
-      }
-      return false; // 保存失败
+      // 服务器保存失败不影响本地使用，只记录错误
+      print('同步设置到服务器失败: ${e.message}');
+      return true; // 本地已保存，返回成功
     } catch (e) {
-      if (mounted) {
-        context.showErrorSnackBar('保存设置失败: ${e.toString()}');
-      }
-      return false; // 保存失败
+      // 服务器保存失败不影响本地使用，只记录错误
+      print('同步设置到服务器失败: ${e.toString()}');
+      return true; // 本地已保存，返回成功
     }
   }
 
   // 自动保存设置（不显示成功提示，失败时显示错误提示）
   Future<void> _autoSaveSettings() async {
-    final success = await _saveSettings();
-    // 如果保存失败，重新从服务器加载设置以恢复一致状态
-    if (!success) {
-      await _loadModelSettings();
-    }
+    await _saveSettings(); // 本地保存总是成功，不需要检查
   }
 
   // 手动保存设置（显示成功提示）
   Future<void> _manualSaveSettings() async {
-    final success = await _saveSettings();
-    if (success) {
-      context.showSnackBar('设置已保存');
-    }
-    // 如果保存失败，重新从服务器加载设置以恢复一致状态
-    if (!success) {
-      await _loadModelSettings();
-    }
+    await _saveSettings();
+    context.showSnackBar('设置已保存');
   }
 
   void _resetModelSettings() {
@@ -131,7 +112,9 @@ class _ModelSettingsScreenState extends State<ModelSettingsScreen> {
     // 重置后自动保存
     _autoSaveSettings();
     
-    context.showSnackBar('已重置为默认设置');
+    if (mounted) {
+      context.showSnackBar('已重置为默认设置');
+    }
   }
 
   @override
@@ -145,11 +128,7 @@ class _ModelSettingsScreenState extends State<ModelSettingsScreen> {
           )
         ),
       ),
-      body: _isLoading
-          ? Center(
-              child: CircularProgressIndicator(),
-            )
-          : SingleChildScrollView(
+      body: SingleChildScrollView(
         padding: EdgeInsets.all(16.0),
         child: Card(
           child: Padding(

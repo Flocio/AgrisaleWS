@@ -54,15 +54,18 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
       final currentUser = results[2] as UserInfo?;
       if (currentUser != null && _workspaces.isNotEmpty) {
         _setOwnerRolesImmediately(currentUser);
-        // 等待所有角色信息加载完成（包括拥有者和其他角色）
-        await _loadWorkspaceRoles();
       }
 
-      // 所有数据加载完成后，才设置isLoading为false
+      // 先显示workspace列表，不等待角色信息加载
       if (mounted) {
         setState(() {
           _isLoading = false;
         });
+      }
+      
+      // 然后异步加载角色信息（不阻塞UI显示）
+      if (currentUser != null && _workspaces.isNotEmpty) {
+        _loadWorkspaceRoles(); // 不等待，后台加载
       }
     } catch (e) {
       if (mounted) {
@@ -175,6 +178,21 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
     }
   }
 
+  /// 切换workspace（只切换当前workspace，不进入）
+  Future<void> _switchWorkspace(Workspace workspace) async {
+    try {
+      await _apiService.setWorkspaceId(workspace.id);
+      if (mounted) {
+        setState(() {
+          _currentWorkspaceId = workspace.id;
+        });
+        context.showSnackBar('已切换到 ${workspace.name}');
+      }
+    } catch (e) {
+      context.showErrorSnackBar('切换 Workspace 失败: ${e.toString()}');
+    }
+  }
+
   /// 进入workspace（跳转到账本界面）
   Future<void> _enterWorkspace(Workspace workspace) async {
     try {
@@ -188,7 +206,7 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
         );
       }
     } catch (e) {
-      context.showErrorSnackBar('切换 Workspace 失败: ${e.toString()}');
+      context.showErrorSnackBar('进入 Workspace 失败: ${e.toString()}');
     }
   }
 
@@ -699,7 +717,7 @@ class _WorkspaceDashboardScreenState extends State<WorkspaceDashboardScreen> {
                 : BorderSide.none,
           ),
           child: InkWell(
-            onTap: () => _enterWorkspace(workspace),
+            onTap: () => _switchWorkspace(workspace),
             borderRadius: BorderRadius.circular(12),
             child: Padding(
               padding: EdgeInsets.all(16),

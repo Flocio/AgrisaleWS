@@ -167,12 +167,12 @@ class _MainScreenState extends State<MainScreen> {
     // 计算菜单位置：在屏幕中央（workspace标题下方）
     final screenWidth = mediaQuery.size.width;
     final menuWidth = 200.0; // 菜单宽度
-    final leftPosition = (screenWidth - menuWidth) / 2; // 居中
+    final leftPosition = (screenWidth - menuWidth) / 2 + 12; // 居中并稍微向右偏移
     
     final position = RelativeRect.fromLTRB(
       leftPosition,
       mediaQuery.padding.top + kToolbarHeight,
-      leftPosition + menuWidth,
+      screenWidth - leftPosition,
       0,
     );
 
@@ -392,7 +392,7 @@ class _MainScreenState extends State<MainScreen> {
                 Text(
                   _currentWorkspace?.name ?? '选择Workspace',
                   style: TextStyle(
-                    fontSize: 18,
+                    fontSize: 20,
                     fontWeight: FontWeight.bold,
                     color: Colors.white,
                   ),

@@ -170,102 +170,160 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                   ),
                   Divider(),
                   SizedBox(height: 8),
-                  Text('当前用户: $_username'),
+                  RichText(
+                    text: TextSpan(
+                      style: TextStyle(
+                        fontSize: 14,  // 明确指定字体大小，与Text默认一致
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
+                      children: [
+                        TextSpan(text: '当前用户: '),
+                        TextSpan(
+                          text: _username ?? '未登录',
+                          style: TextStyle(
+                            fontSize: 14,  // 明确指定字体大小
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green[700],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                   SizedBox(height: 16),
                   Text(
                     '修改密码',
-                    style: TextStyle(fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      fontSize: 14,  // 明确指定字体大小
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   SizedBox(height: 8),
                   Form(
                     key: _formKey,
                     child: Column(
                       children: [
-                        TextFormField(
-                          controller: _currentPasswordController,
-                          decoration: InputDecoration(
-                            labelText: '当前密码',
-                            border: OutlineInputBorder(),
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _obscureCurrentPassword
-                                    ? Icons.visibility_off
-                                    : Icons.visibility,
-                              ),
-                              onPressed: () {
-                                setState(() {
-                                  _obscureCurrentPassword = !_obscureCurrentPassword;
-                                });
-                              },
-                            ),
+                        // 当前密码输入框
+                        Container(
+                          padding: EdgeInsets.symmetric(vertical: 0, horizontal: 16),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[100],
+                            borderRadius: BorderRadius.circular(24),
+                            border: Border.all(color: Colors.grey[300]!, style: BorderStyle.solid, width: 1),
                           ),
-                          obscureText: _obscureCurrentPassword,
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return '请输入当前密码';
-                            }
-                            return null;
-                          },
+                          child: TextFormField(
+                            controller: _currentPasswordController,
+                            style: TextStyle(fontSize: 16, color: Colors.grey[800]),
+                            decoration: InputDecoration(
+                              hintText: '当前密码',
+                              border: InputBorder.none,
+                              contentPadding: EdgeInsets.symmetric(vertical: 12, horizontal: 0),
+                              suffixIcon: IconButton(
+                                icon: Icon(
+                                  _obscureCurrentPassword
+                                      ? Icons.visibility_off
+                                      : Icons.visibility,
+                                  color: Colors.grey[600],
+                                ),
+                                onPressed: () {
+                                  setState(() {
+                                    _obscureCurrentPassword = !_obscureCurrentPassword;
+                                  });
+                                },
+                              ),
+                            ),
+                            obscureText: _obscureCurrentPassword,
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return '请输入当前密码';
+                              }
+                              return null;
+                            },
+                          ),
                         ),
-                        SizedBox(height: 8),
-                        TextFormField(
-                          controller: _newPasswordController,
-                          decoration: InputDecoration(
-                            labelText: '新密码',
-                            border: OutlineInputBorder(),
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _obscureNewPassword
-                                    ? Icons.visibility_off
-                                    : Icons.visibility,
-                              ),
-                              onPressed: () {
-                                setState(() {
-                                  _obscureNewPassword = !_obscureNewPassword;
-                                });
-                              },
-                            ),
+                        SizedBox(height: 12),
+                        // 新密码输入框
+                        Container(
+                          padding: EdgeInsets.symmetric(vertical: 0, horizontal: 16),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[100],
+                            borderRadius: BorderRadius.circular(24),
+                            border: Border.all(color: Colors.grey[300]!, style: BorderStyle.solid, width: 1),
                           ),
-                          obscureText: _obscureNewPassword,
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return '请输入新密码';
-                            }
-                            if (value.length < 3) {
-                              return '密码长度至少为3个字符';
-                            }
-                            return null;
-                          },
+                          child: TextFormField(
+                            controller: _newPasswordController,
+                            style: TextStyle(fontSize: 16, color: Colors.grey[800]),
+                            decoration: InputDecoration(
+                              hintText: '新密码',
+                              border: InputBorder.none,
+                              contentPadding: EdgeInsets.symmetric(vertical: 12, horizontal: 0),
+                              suffixIcon: IconButton(
+                                icon: Icon(
+                                  _obscureNewPassword
+                                      ? Icons.visibility_off
+                                      : Icons.visibility,
+                                  color: Colors.grey[600],
+                                ),
+                                onPressed: () {
+                                  setState(() {
+                                    _obscureNewPassword = !_obscureNewPassword;
+                                  });
+                                },
+                              ),
+                            ),
+                            obscureText: _obscureNewPassword,
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return '请输入新密码';
+                              }
+                              if (value.length < 3) {
+                                return '密码长度至少为3个字符';
+                              }
+                              return null;
+                            },
+                          ),
                         ),
-                        SizedBox(height: 8),
-                        TextFormField(
-                          controller: _confirmPasswordController,
-                          decoration: InputDecoration(
-                            labelText: '确认新密码',
-                            border: OutlineInputBorder(),
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _obscureConfirmPassword
-                                    ? Icons.visibility_off
-                                    : Icons.visibility,
-                              ),
-                              onPressed: () {
-                                setState(() {
-                                  _obscureConfirmPassword = !_obscureConfirmPassword;
-                                });
-                              },
-                            ),
+                        SizedBox(height: 12),
+                        // 确认新密码输入框
+                        Container(
+                          padding: EdgeInsets.symmetric(vertical: 0, horizontal: 16),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[100],
+                            borderRadius: BorderRadius.circular(24),
+                            border: Border.all(color: Colors.grey[300]!, style: BorderStyle.solid, width: 1),
                           ),
-                          obscureText: _obscureConfirmPassword,
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return '请确认新密码';
-                            }
-                            if (value != _newPasswordController.text) {
-                              return '两次输入的密码不一致';
-                            }
-                            return null;
-                          },
+                          child: TextFormField(
+                            controller: _confirmPasswordController,
+                            style: TextStyle(fontSize: 16, color: Colors.grey[800]),
+                            decoration: InputDecoration(
+                              hintText: '确认新密码',
+                              border: InputBorder.none,
+                              contentPadding: EdgeInsets.symmetric(vertical: 12, horizontal: 0),
+                              suffixIcon: IconButton(
+                                icon: Icon(
+                                  _obscureConfirmPassword
+                                      ? Icons.visibility_off
+                                      : Icons.visibility,
+                                  color: Colors.grey[600],
+                                ),
+                                onPressed: () {
+                                  setState(() {
+                                    _obscureConfirmPassword = !_obscureConfirmPassword;
+                                  });
+                                },
+                              ),
+                            ),
+                            obscureText: _obscureConfirmPassword,
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return '请确认新密码';
+                              }
+                              if (value != _newPasswordController.text) {
+                                return '两次输入的密码不一致';
+                              }
+                              return null;
+                            },
+                          ),
                         ),
                         SizedBox(height: 16),
                         ElevatedButton(

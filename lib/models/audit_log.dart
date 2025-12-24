@@ -124,51 +124,24 @@ class AuditLog {
     };
   }
 
-  /// 格式化操作时间为 UTC+8 时区
+  /// 格式化操作时间
+  /// 注意：服务器返回的时间已经是本地时间（UTC+8），直接使用即可
   String get formattedTime {
     try {
-      DateTime dateTime;
+      // 服务器返回的时间已经是 UTC+8（中国标准时间），直接显示
+      // 如果时间格式正确（YYYY-MM-DD HH:MM:SS），直接返回
       String timeStr = operationTime.trim();
       
-      // 如果格式是 "YYYY-MM-DD HH:MM:SS"（没有时区信息），假设是 UTC 时间
       if (timeStr.length == 19 && 
           timeStr.contains(' ') && 
-          !timeStr.contains('T') && 
-          !timeStr.contains('+') && 
-          !timeStr.contains('Z')) {
-        // 手动解析为 UTC 时间
-        final parts = timeStr.split(' ');
-        if (parts.length == 2) {
-          final dateParts = parts[0].split('-');
-          final timeParts = parts[1].split(':');
-          
-          if (dateParts.length == 3 && timeParts.length == 3) {
-            final year = int.parse(dateParts[0]);
-            final month = int.parse(dateParts[1]);
-            final day = int.parse(dateParts[2]);
-            final hour = int.parse(timeParts[0]);
-            final minute = int.parse(timeParts[1]);
-            final second = int.parse(timeParts[2]);
-            
-            // 创建 UTC 时间的 DateTime 对象
-            dateTime = DateTime.utc(year, month, day, hour, minute, second);
-          } else {
-            // 解析失败，尝试标准解析
-            dateTime = DateTime.parse(timeStr).toUtc();
-          }
-        } else {
-          dateTime = DateTime.parse(timeStr).toUtc();
-        }
-      } else {
-        // 标准 ISO8601 格式解析（可能包含时区信息）
-        dateTime = DateTime.parse(timeStr);
-        // 统一转换为 UTC 时间
-        dateTime = dateTime.toUtc();
+          !timeStr.contains('T')) {
+        // 格式正确，直接返回
+        return timeStr;
       }
       
-      // 格式化为 UTC+8 时区显示（UTC时间 + 8小时）
-      final utc8 = dateTime.add(Duration(hours: 8));
-      return '${utc8.year}-${utc8.month.toString().padLeft(2, '0')}-${utc8.day.toString().padLeft(2, '0')} ${utc8.hour.toString().padLeft(2, '0')}:${utc8.minute.toString().padLeft(2, '0')}:${utc8.second.toString().padLeft(2, '0')}';
+      // 如果是 ISO8601 格式，解析后格式化
+      final dateTime = DateTime.parse(timeStr);
+      return '${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')} ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}:${dateTime.second.toString().padLeft(2, '0')}';
     } catch (e) {
       // 如果解析失败，返回原始字符串
       return operationTime;
