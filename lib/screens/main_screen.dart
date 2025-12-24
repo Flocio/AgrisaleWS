@@ -205,6 +205,11 @@ class _MainScreenState extends State<MainScreen> {
     );
     
     if (result == 'dashboard') {
+      // 先备份当前workspace（如果开启了退出备份）
+      await AutoBackupService().backupOnWorkspaceExitIfNeeded();
+      // 停止当前workspace的自动备份
+      await AutoBackupService().stopAutoBackup();
+      
       // 返回主界面（使用自定义转场动画，向左滑动，后退效果）
       Navigator.pushReplacement(
         context,

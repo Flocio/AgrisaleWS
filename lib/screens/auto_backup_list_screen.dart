@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../services/auto_backup_service.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../repositories/workspace_repository.dart';
+import '../models/api_error.dart';
 import '../widgets/footer_widget.dart';
 import '../utils/snackbar_helper.dart';
 
@@ -13,12 +15,130 @@ class AutoBackupListScreen extends StatefulWidget {
 class _AutoBackupListScreenState extends State<AutoBackupListScreen> {
   List<Map<String, dynamic>> _backupList = [];
   bool _isLoading = true;
+  String? _userRole; // 当前用户在workspace中的角色
+  bool _isLoadingRole = true; // 角色加载状态
   final _backupService = AutoBackupService();
+  final _workspaceRepo = WorkspaceRepository();
+  final _authService = AuthService();
+  final _apiService = ApiService();
 
   @override
   void initState() {
     super.initState();
     _loadBackupList();
+    _loadUserRole(); // 加载用户角色
+  }
+
+  /// 加载用户角色
+  Future<void> _loadUserRole() async {
+    setState(() {
+      _isLoadingRole = true;
+    });
+
+    try {
+      final workspaceId = await _apiService.getWorkspaceId();
+      if (workspaceId == null) {
+        if (mounted) {
+          setState(() {
+            _userRole = null;
+            _isLoadingRole = false;
+          });
+        }
+        return;
+      }
+
+      final workspace = await _apiService.getCurrentWorkspace();
+      if (workspace == null) {
+        if (mounted) {
+          setState(() {
+            _userRole = null;
+            _isLoadingRole = false;
+          });
+        }
+        return;
+      }
+
+      final currentUser = await _authService.getCurrentUser();
+      if (currentUser == null) {
+        if (mounted) {
+          setState(() {
+            _userRole = null;
+            _isLoadingRole = false;
+          });
+        }
+        return;
+      }
+
+      final storageType = workspace['storage_type'] as String? ?? workspace['storageType'] as String?;
+      final ownerId = workspace['ownerId'] as int? ?? workspace['owner_id'] as int?;
+
+      // 对于服务器workspace，检查用户角色
+      if (storageType == 'server') {
+        // 检查是否是拥有者
+        if (ownerId == currentUser.id) {
+          if (mounted) {
+            setState(() {
+              _userRole = 'owner';
+              _isLoadingRole = false;
+            });
+          }
+          return;
+        }
+
+        // 获取成员列表并找到当前用户的角色
+        try {
+          final members = await _workspaceRepo.getWorkspaceMembers(workspaceId);
+          final member = members.firstWhere(
+            (m) => m.userId == currentUser.id,
+            orElse: () => throw Exception('Not found'),
+          );
+          if (mounted) {
+            setState(() {
+              _userRole = member.role;
+              _isLoadingRole = false;
+            });
+          }
+        } catch (e) {
+          // 如果不是成员，没有权限
+          if (mounted) {
+            setState(() {
+              _userRole = null;
+              _isLoadingRole = false;
+            });
+          }
+        }
+      } else {
+        // 本地workspace，拥有者就是创建者
+        if (ownerId == currentUser.id) {
+          if (mounted) {
+            setState(() {
+              _userRole = 'owner';
+              _isLoadingRole = false;
+            });
+          }
+        } else {
+          if (mounted) {
+            setState(() {
+              _userRole = null;
+              _isLoadingRole = false;
+            });
+          }
+        }
+      }
+    } catch (e) {
+      print('加载用户角色失败: $e');
+      if (mounted) {
+        setState(() {
+          _userRole = null;
+          _isLoadingRole = false;
+        });
+      }
+    }
+  }
+
+  /// 检查是否有恢复权限（只有拥有者和管理员可以恢复）
+  bool _canRestore() {
+    return _userRole == 'owner' || _userRole == 'admin';
   }
 
   Future<void> _loadBackupList() async {
@@ -80,7 +200,10 @@ class _AutoBackupListScreenState extends State<AutoBackupListScreen> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(context).pop(true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
             child: Text('删除'),
           ),
         ],
@@ -116,7 +239,10 @@ class _AutoBackupListScreenState extends State<AutoBackupListScreen> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(context).pop(true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
             child: Text('全部删除'),
           ),
         ],
@@ -147,6 +273,12 @@ class _AutoBackupListScreenState extends State<AutoBackupListScreen> {
   }
 
   Future<void> _restoreBackup(Map<String, dynamic> backup) async {
+    // 检查权限
+    if (!_canRestore()) {
+      context.showErrorSnackBar('只有拥有者和管理员可以恢复备份');
+      return;
+    }
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -193,7 +325,10 @@ class _AutoBackupListScreenState extends State<AutoBackupListScreen> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(context).pop(true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
             child: Text('确认恢复'),
           ),
         ],
@@ -470,13 +605,16 @@ class _AutoBackupListScreenState extends State<AutoBackupListScreen> {
                   label: Text('删除', style: TextStyle(color: Colors.red)),
                 ),
                 SizedBox(width: 8),
-                ElevatedButton.icon(
-                  onPressed: () => _restoreBackup(backup),
-                  icon: Icon(Icons.restore, size: 18),
-                  label: Text('恢复'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
+                Tooltip(
+                  message: _canRestore() ? '' : '只有拥有者和管理员可以恢复备份',
+                  child: ElevatedButton.icon(
+                    onPressed: _canRestore() ? () => _restoreBackup(backup) : null,
+                    icon: Icon(Icons.restore, size: 18),
+                    label: Text('恢复'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _canRestore() ? Colors.green : Colors.grey,
+                      foregroundColor: Colors.white,
+                    ),
                   ),
                 ),
               ],

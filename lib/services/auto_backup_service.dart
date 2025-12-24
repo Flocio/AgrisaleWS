@@ -224,6 +224,9 @@ class AutoBackupService {
         return; // 没有workspace，不需要备份
       }
 
+      // 确保 _currentWorkspaceId 已设置（用于 _getWorkspaceKey）
+      _currentWorkspaceId = workspaceId;
+
       final prefs = await SharedPreferences.getInstance();
       final backupOnExitKey = _getWorkspaceKey('auto_backup_on_exit');
       final backupOnExit = prefs.getBool(backupOnExitKey) ?? false;
@@ -250,6 +253,7 @@ class AutoBackupService {
         final prefs = await SharedPreferences.getInstance();
         final workspaceId = await _apiService.getWorkspaceId();
         if (workspaceId != null) {
+          _currentWorkspaceId = workspaceId; // 确保设置
           final exitBackupKey = _getWorkspaceKey('exit_backup_in_progress');
           await prefs.setBool(exitBackupKey, false);
         }
@@ -265,6 +269,9 @@ class AutoBackupService {
       if (workspaceId == null) {
         return; // 没有workspace，不需要检查
       }
+
+      // 确保 _currentWorkspaceId 已设置（用于 _getWorkspaceKey）
+      _currentWorkspaceId = workspaceId;
 
       final prefs = await SharedPreferences.getInstance();
       final exitBackupKey = _getWorkspaceKey('exit_backup_in_progress');
