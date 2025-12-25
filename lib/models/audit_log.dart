@@ -4,7 +4,8 @@
 enum OperationType {
   create('CREATE'),
   update('UPDATE'),
-  delete('DELETE');
+  delete('DELETE'),
+  cover('COVER');
 
   final String value;
   const OperationType(this.value);
@@ -24,6 +25,8 @@ enum OperationType {
         return '修改';
       case OperationType.delete:
         return '删除';
+      case OperationType.cover:
+        return '覆盖';
     }
   }
 }
@@ -38,7 +41,8 @@ enum EntityType {
   sale('sale', '销售'),
   return_('return', '退货'),
   income('income', '进账'),
-  remittance('remittance', '汇款');
+  remittance('remittance', '汇款'),
+  workspace_data('workspace_data', '全域');
 
   final String value;
   final String displayName;

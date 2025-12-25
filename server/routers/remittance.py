@@ -404,7 +404,17 @@ async def create_remittance_record(
             
             # 记录操作日志
             try:
-                entity_name = f"汇款记录 (金额: ¥{remittance_data.amount})"
+                # 获取供应商名称用于日志显示
+                supplier_name = "未知供应商"
+                if remittance_data.supplierId:
+                    supplier_cursor = conn.execute(
+                        "SELECT name FROM suppliers WHERE id = ?",
+                        (remittance_data.supplierId,)
+                    )
+                    supplier_row = supplier_cursor.fetchone()
+                    if supplier_row:
+                        supplier_name = supplier_row[0]
+                entity_name = f"{supplier_name} (金额: ¥{remittance_data.amount})"
                 AuditLogService.log_create(
                     user_id=user_id,
                     username=current_user.get("username", "unknown"),
@@ -627,7 +637,17 @@ async def update_remittance_record(
             
             # 记录操作日志
             try:
-                entity_name = f"汇款记录 (金额: ¥{remittance.amount})"
+                # 获取供应商名称用于日志显示
+                supplier_name = "未知供应商"
+                if remittance.supplierId:
+                    supplier_cursor = conn.execute(
+                        "SELECT name FROM suppliers WHERE id = ?",
+                        (remittance.supplierId,)
+                    )
+                    supplier_row = supplier_cursor.fetchone()
+                    if supplier_row:
+                        supplier_name = supplier_row[0]
+                entity_name = f"{supplier_name} (金额: ¥{remittance.amount})"
                 AuditLogService.log_update(
                     user_id=user_id,
                     username=current_user.get("username", "unknown"),
@@ -740,7 +760,18 @@ async def delete_remittance_record(
             
             # 记录操作日志
             try:
-                entity_name = f"汇款记录 (金额: ¥{amount})"
+                # 获取供应商名称用于日志显示
+                supplier_name = "未知供应商"
+                supplier_id = row[3]  # supplierId
+                if supplier_id:
+                    supplier_cursor = conn.execute(
+                        "SELECT name FROM suppliers WHERE id = ?",
+                        (supplier_id,)
+                    )
+                    supplier_row = supplier_cursor.fetchone()
+                    if supplier_row:
+                        supplier_name = supplier_row[0]
+                entity_name = f"{supplier_name} (金额: ¥{amount})"
                 AuditLogService.log_delete(
                     user_id=user_id,
                     username=current_user.get("username", "unknown"),

@@ -409,7 +409,17 @@ async def create_income_record(
             
             # 记录操作日志
             try:
-                entity_name = f"进账记录 (金额: ¥{income_data.amount})"
+                # 获取客户名称用于日志显示
+                customer_name = "未知客户"
+                if income_data.customerId:
+                    customer_cursor = conn.execute(
+                        "SELECT name FROM customers WHERE id = ?",
+                        (income_data.customerId,)
+                    )
+                    customer_row = customer_cursor.fetchone()
+                    if customer_row:
+                        customer_name = customer_row[0]
+                entity_name = f"{customer_name} (金额: ¥{income_data.amount})"
                 AuditLogService.log_create(
                     user_id=user_id,
                     username=current_user.get("username", "unknown"),
@@ -638,7 +648,17 @@ async def update_income_record(
             
             # 记录操作日志
             try:
-                entity_name = f"进账记录 (金额: ¥{income.amount})"
+                # 获取客户名称用于日志显示
+                customer_name = "未知客户"
+                if income.customerId:
+                    customer_cursor = conn.execute(
+                        "SELECT name FROM customers WHERE id = ?",
+                        (income.customerId,)
+                    )
+                    customer_row = customer_cursor.fetchone()
+                    if customer_row:
+                        customer_name = customer_row[0]
+                entity_name = f"{customer_name} (金额: ¥{income.amount})"
                 AuditLogService.log_update(
                     user_id=user_id,
                     username=current_user.get("username", "unknown"),
@@ -671,6 +691,7 @@ async def update_income_record(
 @router.delete("/{income_id}", response_model=BaseResponse)
 async def delete_income_record(
     income_id: int,
+    workspace_id: Optional[int] = Header(None, alias="X-Workspace-ID"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -678,6 +699,7 @@ async def delete_income_record(
     
     Args:
         income_id: 进账记录ID
+        workspace_id: Workspace ID（可选，如果提供则只删除该workspace的数据）
         current_user: 当前用户信息
     
     Returns:
@@ -688,15 +710,33 @@ async def delete_income_record(
     
     try:
         with pool.get_connection() as conn:
+            # 构建查询条件
+            if workspace_id is not None:
+                # 检查是否为服务器存储类型（本地 workspace 的业务数据存储在客户端）
+                await require_server_storage(workspace_id, user_id)
+                # 检查删除权限
+                can_delete = await check_workspace_permission(workspace_id, user_id, 'delete')
+                if not can_delete:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="无删除权限"
+                    )
+                where_clause = "id = ? AND workspaceId = ?"
+                params = (income_id, workspace_id)
+            else:
+                # 向后兼容：使用userId过滤
+                where_clause = "id = ? AND userId = ?"
+                params = (income_id, user_id)
+            
             # 获取进账记录完整信息用于日志记录
             cursor = conn.execute(
-                """
+                f"""
                 SELECT id, userId, incomeDate, customerId, amount, discount, employeeId,
                        paymentMethod, note, created_at
                 FROM income
-                WHERE id = ? AND userId = ?
+                WHERE {where_clause}
                 """,
-                (income_id, user_id)
+                params
             )
             row = cursor.fetchone()
             
@@ -732,7 +772,18 @@ async def delete_income_record(
             
             # 记录操作日志
             try:
-                entity_name = f"进账记录 (金额: ¥{amount})"
+                # 获取客户名称用于日志显示
+                customer_name = "未知客户"
+                customer_id = row[3]  # customerId
+                if customer_id:
+                    customer_cursor = conn.execute(
+                        "SELECT name FROM customers WHERE id = ?",
+                        (customer_id,)
+                    )
+                    customer_row = customer_cursor.fetchone()
+                    if customer_row:
+                        customer_name = customer_row[0]
+                entity_name = f"{customer_name} (金额: ¥{amount})"
                 AuditLogService.log_delete(
                     user_id=user_id,
                     username=current_user.get("username", "unknown"),

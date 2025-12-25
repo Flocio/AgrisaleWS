@@ -1034,11 +1034,11 @@ async def delete_sale(
                         detail=f"删除销售记录失败: {str(e)}"
                     )
             
-                    # 删除销售记录
-                    conn.execute(
-                        f"DELETE FROM sales WHERE {where_clause}",
-                        params
-                    )
+            # 删除销售记录
+            conn.execute(
+                f"DELETE FROM sales WHERE {where_clause}",
+                params
+            )
             conn.commit()
             
             logger.info(f"删除销售记录成功: {product_name} 数量: {quantity} (ID: {sale_id}, 用户: {user_id})")

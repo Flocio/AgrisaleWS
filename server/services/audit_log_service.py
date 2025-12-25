@@ -117,7 +117,7 @@ class AuditLogService:
         Args:
             user_id: 用户ID
             username: 用户名
-            operation_type: 操作类型（CREATE/UPDATE/DELETE）
+            operation_type: 操作类型（CREATE/UPDATE/DELETE/COVER）
             entity_type: 实体类型（product/sale/purchase等）
             entity_id: 实体ID
             entity_name: 实体名称

@@ -1050,11 +1050,11 @@ async def delete_purchase(
                         detail=f"删除采购记录失败: {str(e)}"
                     )
             
-                    # 删除采购记录
-                    conn.execute(
-                        f"DELETE FROM purchases WHERE {where_clause}",
-                        params
-                    )
+            # 删除采购记录
+            conn.execute(
+                f"DELETE FROM purchases WHERE {where_clause}",
+                params
+            )
             conn.commit()
             
             logger.info(f"删除采购记录成功: {product_name} 数量: {quantity} (ID: {purchase_id}, 用户: {user_id})")

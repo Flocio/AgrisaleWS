@@ -560,7 +560,21 @@ class RemittanceRepository {
 
       // 记录操作日志
       try {
-        final entityName = '汇款记录 (金额: ¥${remittance.amount})';
+        // 获取供应商名称用于日志显示
+        String supplierName = '未知供应商';
+        final supplierId = remittance.supplierId == 0 ? null : remittance.supplierId;
+        if (supplierId != null) {
+          final supplierResult = await db.query(
+            'suppliers',
+            columns: ['name'],
+            where: 'id = ?',
+            whereArgs: [supplierId],
+          );
+          if (supplierResult.isNotEmpty) {
+            supplierName = supplierResult.first['name'] as String;
+          }
+        }
+        final entityName = '$supplierName (金额: ¥${remittance.amount})';
         await LocalAuditLogService().logCreate(
           entityType: EntityType.remittance,
           entityId: id,
@@ -569,7 +583,7 @@ class RemittanceRepository {
             'id': id,
             'userId': userId,
             'remittanceDate': remittance.remittanceDate,
-            'supplierId': remittance.supplierId == 0 ? null : remittance.supplierId,
+            'supplierId': supplierId,
             'amount': remittance.amount,
             'employeeId': remittance.employeeId,
             'paymentMethod': remittance.paymentMethod.value,
@@ -728,7 +742,20 @@ class RemittanceRepository {
       // 记录操作日志
       try {
         final current = currentResult.first;
-        final entityName = '汇款记录 (金额: ¥${updatedRemittance.amount})';
+        // 获取供应商名称用于日志显示
+        String supplierName = '未知供应商';
+        if (updatedRemittance.supplierId != null && updatedRemittance.supplierId != 0) {
+          final supplierResult = await db.query(
+            'suppliers',
+            columns: ['name'],
+            where: 'id = ?',
+            whereArgs: [updatedRemittance.supplierId],
+          );
+          if (supplierResult.isNotEmpty) {
+            supplierName = supplierResult.first['name'] as String;
+          }
+        }
+        final entityName = '$supplierName (金额: ¥${updatedRemittance.amount})';
         final oldData = {
           'id': current['id'],
           'userId': current['userId'],
@@ -838,7 +865,21 @@ class RemittanceRepository {
       
       final remittanceRow = remittance.first;
       final amount = (remittanceRow['amount'] as num?)?.toDouble() ?? 0.0;
-      final entityName = '汇款记录 (金额: ¥$amount)';
+      final supplierId = remittanceRow['supplierId'] as int?;
+      // 获取供应商名称用于日志显示
+      String supplierName = '未知供应商';
+      if (supplierId != null) {
+        final supplierResult = await db.query(
+          'suppliers',
+          columns: ['name'],
+          where: 'id = ?',
+          whereArgs: [supplierId],
+        );
+        if (supplierResult.isNotEmpty) {
+          supplierName = supplierResult.first['name'] as String;
+        }
+      }
+      final entityName = '$supplierName (金额: ¥$amount)';
       final oldData = {
         'id': remittanceRow['id'],
         'userId': remittanceRow['userId'],

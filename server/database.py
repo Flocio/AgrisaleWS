@@ -128,11 +128,11 @@ class SQLiteConnectionPool:
                     # 首次创建数据库
                     logger.info("首次创建数据库，执行初始化脚本...")
                     self._create_tables(conn)
-                    self._set_version(conn, 19)
+                    self._set_version(conn, 20)
                 else:
                     # 升级数据库
                     logger.info(f"数据库版本: {version}, 检查是否需要升级...")
-                    self._upgrade_database(conn, version, 19)
+                    self._upgrade_database(conn, version, 20)
                     # 无论版本如何，都检查并修复 user_settings 表的列（兼容性修复）
                     self._ensure_user_settings_columns(conn)
         except Exception as e:
@@ -408,7 +408,7 @@ class SQLiteConnectionPool:
                 userId INTEGER NOT NULL,
                 workspaceId INTEGER,
                 username TEXT NOT NULL,
-                operation_type TEXT NOT NULL CHECK(operation_type IN ('CREATE', 'UPDATE', 'DELETE')),
+                operation_type TEXT NOT NULL CHECK(operation_type IN ('CREATE', 'UPDATE', 'DELETE', 'COVER')),
                 entity_type TEXT NOT NULL,
                 entity_id INTEGER,
                 entity_name TEXT,
@@ -664,7 +664,7 @@ class SQLiteConnectionPool:
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         userId INTEGER NOT NULL,
                         username TEXT NOT NULL,
-                        operation_type TEXT NOT NULL CHECK(operation_type IN ('CREATE', 'UPDATE', 'DELETE')),
+                        operation_type TEXT NOT NULL CHECK(operation_type IN ('CREATE', 'UPDATE', 'DELETE', 'COVER')),
                         entity_type TEXT NOT NULL,
                         entity_id INTEGER,
                         entity_name TEXT,
@@ -943,6 +943,99 @@ class SQLiteConnectionPool:
                 logger.info("升级到版本 19 完成：唯一性约束已改为 workspace 级别")
             except Exception as e:
                 logger.error(f"升级到版本 19 失败: {e}", exc_info=True)
+                conn.rollback()
+                raise
+        
+        # 版本 20: 更新 operation_logs 表的 CHECK 约束，添加 COVER 操作类型
+        if old_version < 20:
+            logger.info("升级到版本 20: 更新 operation_logs 表的 CHECK 约束，添加 COVER 操作类型")
+            try:
+                # 检查 operation_logs 表是否存在
+                cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='operation_logs'")
+                if cursor.fetchone():
+                    # 表存在，需要重建以更新 CHECK 约束
+                    logger.info("重建 operation_logs 表以更新 CHECK 约束...")
+                    
+                    # 1. 创建新表（带新的 CHECK 约束）
+                    conn.execute('''
+                        CREATE TABLE operation_logs_new (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            userId INTEGER NOT NULL,
+                            workspaceId INTEGER,
+                            username TEXT NOT NULL,
+                            operation_type TEXT NOT NULL CHECK(operation_type IN ('CREATE', 'UPDATE', 'DELETE', 'COVER')),
+                            entity_type TEXT NOT NULL,
+                            entity_id INTEGER,
+                            entity_name TEXT,
+                            old_data TEXT,
+                            new_data TEXT,
+                            changes TEXT,
+                            ip_address TEXT,
+                            device_info TEXT,
+                            operation_time TEXT DEFAULT (datetime('now')),
+                            note TEXT,
+                            FOREIGN KEY (userId) REFERENCES users (id) ON DELETE CASCADE,
+                            FOREIGN KEY (workspaceId) REFERENCES workspaces (id) ON DELETE SET NULL
+                        )
+                    ''')
+                    
+                    # 2. 复制数据（只复制符合新约束的数据）
+                    conn.execute('''
+                        INSERT INTO operation_logs_new 
+                        SELECT * FROM operation_logs
+                        WHERE operation_type IN ('CREATE', 'UPDATE', 'DELETE', 'COVER')
+                    ''')
+                    
+                    # 3. 删除旧表
+                    conn.execute('DROP TABLE operation_logs')
+                    
+                    # 4. 重命名新表
+                    conn.execute('ALTER TABLE operation_logs_new RENAME TO operation_logs')
+                    
+                    # 5. 重新创建索引
+                    conn.execute('CREATE INDEX IF NOT EXISTS idx_logs_userId_time ON operation_logs(userId, operation_time DESC)')
+                    conn.execute('CREATE INDEX IF NOT EXISTS idx_logs_entity ON operation_logs(entity_type, entity_id)')
+                    conn.execute('CREATE INDEX IF NOT EXISTS idx_logs_type ON operation_logs(operation_type)')
+                    conn.execute('CREATE INDEX IF NOT EXISTS idx_logs_workspaceId ON operation_logs(workspaceId)')
+                    
+                    logger.info("已更新 operation_logs 表的 CHECK 约束，添加了 COVER 操作类型")
+                else:
+                    # 表不存在，直接创建（带新的 CHECK 约束）
+                    logger.info("创建 operation_logs 表（带 COVER 操作类型）...")
+                    conn.execute('''
+                        CREATE TABLE IF NOT EXISTS operation_logs (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            userId INTEGER NOT NULL,
+                            workspaceId INTEGER,
+                            username TEXT NOT NULL,
+                            operation_type TEXT NOT NULL CHECK(operation_type IN ('CREATE', 'UPDATE', 'DELETE', 'COVER')),
+                            entity_type TEXT NOT NULL,
+                            entity_id INTEGER,
+                            entity_name TEXT,
+                            old_data TEXT,
+                            new_data TEXT,
+                            changes TEXT,
+                            ip_address TEXT,
+                            device_info TEXT,
+                            operation_time TEXT DEFAULT (datetime('now')),
+                            note TEXT,
+                            FOREIGN KEY (userId) REFERENCES users (id) ON DELETE CASCADE,
+                            FOREIGN KEY (workspaceId) REFERENCES workspaces (id) ON DELETE SET NULL
+                        )
+                    ''')
+                    
+                    # 创建索引
+                    conn.execute('CREATE INDEX IF NOT EXISTS idx_logs_userId_time ON operation_logs(userId, operation_time DESC)')
+                    conn.execute('CREATE INDEX IF NOT EXISTS idx_logs_entity ON operation_logs(entity_type, entity_id)')
+                    conn.execute('CREATE INDEX IF NOT EXISTS idx_logs_type ON operation_logs(operation_type)')
+                    conn.execute('CREATE INDEX IF NOT EXISTS idx_logs_workspaceId ON operation_logs(workspaceId)')
+                    
+                    logger.info("已创建 operation_logs 表（带 COVER 操作类型）")
+                
+                conn.commit()
+                logger.info("升级到版本 20 完成：operation_logs 表已更新")
+            except Exception as e:
+                logger.error(f"升级到版本 20 失败: {e}", exc_info=True)
                 conn.rollback()
                 raise
         

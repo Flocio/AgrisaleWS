@@ -18,6 +18,7 @@ from server.middleware.workspace_permission import (
     get_workspace_storage_type,
     PERMISSIONS
 )
+from server.services.audit_log_service import AuditLogService
 from server.models import (
     WorkspaceCreate,
     WorkspaceUpdate,
@@ -1002,6 +1003,25 @@ async def import_workspace_data(
             conn.execute("BEGIN")
             
             try:
+                # 0. 在删除前，先获取当前数据作为 oldData（用于日志对比）
+                old_data = {
+                    "workspace_id": workspace_id,
+                    "import_counts": {}
+                }
+                
+                # 统计当前各表的数据量
+                tables = ['suppliers', 'customers', 'employees', 'products', 
+                         'purchases', 'sales', 'returns', 'income', 'remittance']
+                for table in tables:
+                    cursor = conn.execute(
+                        f"SELECT COUNT(*) FROM {table} WHERE workspaceId = ?",
+                        (workspace_id,)
+                    )
+                    count = cursor.fetchone()[0]
+                    old_data["import_counts"][table] = count
+                
+                old_data["total_count"] = sum(old_data["import_counts"].values())
+                
                 # 1. 删除该 workspace 的所有业务数据
                 conn.execute("DELETE FROM remittance WHERE workspaceId = ?", (workspace_id,))
                 conn.execute("DELETE FROM income WHERE workspaceId = ?", (workspace_id,))
@@ -1217,6 +1237,49 @@ async def import_workspace_data(
                 conn.execute("COMMIT")
                 
                 logger.info(f"Workspace {workspace_id} 数据导入成功: 用户 {user_id}")
+                
+                # 记录操作日志
+                try:
+                    import_counts = {
+                        "suppliers": supplier_count,
+                        "customers": customer_count,
+                        "employees": employee_count,
+                        "products": product_count,
+                        "purchases": purchase_count,
+                        "sales": sale_count,
+                        "returns": return_count,
+                        "income": income_count,
+                        "remittance": remittance_count
+                    }
+                    total_count = sum(import_counts.values())
+                    
+                    # 根据导入来源决定日志内容
+                    source = import_request.source or "manual"
+                    if source == "backup":
+                        entity_name = "备份恢复"
+                        note = f"恢复备份（覆盖）：供应商 {supplier_count}，客户 {customer_count}，员工 {employee_count}，产品 {product_count}，采购 {purchase_count}，销售 {sale_count}，退货 {return_count}，进账 {income_count}，汇款 {remittance_count}，总计 {total_count} 条"
+                    else:
+                        entity_name = "数据导入"
+                        note = f"导入数据（覆盖）：供应商 {supplier_count}，客户 {customer_count}，员工 {employee_count}，产品 {product_count}，采购 {purchase_count}，销售 {sale_count}，退货 {return_count}，进账 {income_count}，汇款 {remittance_count}，总计 {total_count} 条"
+                    
+                    AuditLogService.log_operation(
+                        user_id=user_id,
+                        username=current_user.get("username", "unknown"),
+                        operation_type="COVER",
+                        entity_type="workspace_data",
+                        entity_id=workspace_id,
+                        entity_name=entity_name,
+                        old_data=old_data,
+                        new_data={
+                            "workspace_id": workspace_id,
+                            "import_counts": import_counts,
+                            "total_count": total_count
+                        },
+                        note=note,
+                        workspace_id=workspace_id
+                    )
+                except Exception as e:
+                    logger.warning(f"记录数据导入日志失败: {e}")
                 
                 return BaseResponse(
                     success=True,

@@ -21,6 +21,8 @@ import 'package:sqflite/sqflite.dart';
 import '../models/api_error.dart';
 import '../models/api_response.dart';
 import 'api_service.dart';
+import 'local_audit_log_service.dart';
+import '../models/audit_log.dart';
 
 class AutoBackupService {
   static final AutoBackupService _instance = AutoBackupService._internal();
@@ -642,6 +644,8 @@ class AutoBackupService {
       // 根据workspace类型选择导入方式
       if (storageType == 'server') {
         // 服务器workspace：调用API导入
+        // 标记为备份恢复，以便服务器端记录正确的日志
+        importData['source'] = 'backup';
         await _workspaceRepo.importWorkspaceData(workspaceId, importData);
       } else {
         // 本地workspace：直接操作本地数据库
@@ -676,6 +680,29 @@ class AutoBackupService {
     
     // 在事务中执行导入
     await db.transaction((txn) async {
+      // 0. 在删除前，先获取当前数据作为 oldData（用于日志对比）
+      final oldData = <String, dynamic>{
+        'workspaceId': workspaceId,
+        'import_counts': <String, int>{},
+      };
+      
+      // 统计当前各表的数据量
+      final tables = ['suppliers', 'customers', 'employees', 'products', 
+                     'purchases', 'sales', 'returns', 'income', 'remittance'];
+      for (final table in tables) {
+        final result = await txn.rawQuery(
+          'SELECT COUNT(*) as count FROM $table WHERE workspaceId = ?',
+          [workspaceId]
+        );
+        final count = result.first['count'] as int? ?? 0;
+        oldData['import_counts'][table] = count;
+      }
+      
+      final oldTotalCount = (oldData['import_counts'] as Map<String, int>)
+          .values
+          .fold<int>(0, (sum, count) => sum + count);
+      oldData['total_count'] = oldTotalCount;
+      
       // 1. 删除该workspace的所有业务数据
       await txn.delete('remittance', where: 'workspaceId = ?', whereArgs: [workspaceId]);
       await txn.delete('income', where: 'workspaceId = ?', whereArgs: [workspaceId]);
@@ -921,6 +948,53 @@ class AutoBackupService {
           'note': remittanceData['note'] as String?,
           'created_at': DateTime.now().toIso8601String(),
         });
+      }
+      
+      // 统计导入的数据量
+      final supplierCount = suppliers.length;
+      final customerCount = customers.length;
+      final employeeCount = employees.length;
+      final productCount = products.length;
+      final purchaseCount = purchases.length;
+      final saleCount = sales.length;
+      final returnCount = returns.length;
+      final incomeCount = income.length;
+      final remittanceCount = remittance.length;
+      final totalCount = supplierCount + customerCount + employeeCount + productCount + 
+                        purchaseCount + saleCount + returnCount + incomeCount + remittanceCount;
+      
+      // 记录操作日志（在事务内）
+      try {
+        await LocalAuditLogService().logOperation(
+          operationType: OperationType.cover,
+          entityType: EntityType.workspace_data,
+          entityId: workspaceId,
+          entityName: '备份恢复',
+          oldData: oldData,
+          newData: {
+            'workspaceId': workspaceId,
+            'import_counts': {
+              'suppliers': supplierCount,
+              'customers': customerCount,
+              'employees': employeeCount,
+              'products': productCount,
+              'purchases': purchaseCount,
+              'sales': saleCount,
+              'returns': returnCount,
+              'income': incomeCount,
+              'remittance': remittanceCount,
+            },
+            'total_count': totalCount,
+          },
+          note: '恢复备份（覆盖）：供应商 $supplierCount，客户 $customerCount，员工 $employeeCount，产品 $productCount，采购 $purchaseCount，销售 $saleCount，退货 $returnCount，进账 $incomeCount，汇款 $remittanceCount，总计 $totalCount 条',
+          transaction: txn,
+          userId: userId,
+          workspaceId: workspaceId,
+          username: username,
+        );
+      } catch (e) {
+        print('记录数据导入日志失败: $e');
+        // 日志记录失败不影响业务
       }
     });
   }

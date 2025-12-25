@@ -476,7 +476,7 @@ class DatabaseHelper {
           userId INTEGER NOT NULL,
           workspaceId INTEGER,
           username TEXT NOT NULL,
-          operation_type TEXT NOT NULL CHECK(operation_type IN ('CREATE', 'UPDATE', 'DELETE')),
+          operation_type TEXT NOT NULL CHECK(operation_type IN ('CREATE', 'UPDATE', 'DELETE', 'COVER')),
           entity_type TEXT NOT NULL,
           entity_id INTEGER,
           entity_name TEXT,

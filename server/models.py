@@ -705,6 +705,7 @@ class ImportDataRequest(BaseModel):
     """数据导入请求"""
     exportInfo: Dict[str, Any]
     data: Dict[str, List[Any]]
+    source: Optional[str] = Field(None, description="导入来源：'backup' 表示备份恢复，'manual' 表示手动导入，None 表示未指定（默认为手动导入）")
 
 
 # ==================== 辅助函数 ====================
@@ -744,6 +745,7 @@ class OperationType(str, Enum):
     CREATE = "CREATE"
     UPDATE = "UPDATE"
     DELETE = "DELETE"
+    COVER = "COVER"
 
 
 class EntityType(str, Enum):
@@ -757,6 +759,7 @@ class EntityType(str, Enum):
     RETURN = "return"
     INCOME = "income"
     REMITTANCE = "remittance"
+    WORKSPACE_DATA = "workspace_data"
 
 
 class AuditLogCreate(BaseModel):

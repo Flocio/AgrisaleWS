@@ -34,7 +34,7 @@ router = APIRouter(prefix="/api/audit-logs", tags=["操作日志"])
 async def get_audit_logs(
     page: int = Query(1, ge=1, description="页码，从1开始"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量（最大100）"),
-    operation_type: Optional[str] = Query(None, description="操作类型筛选（CREATE/UPDATE/DELETE）"),
+    operation_type: Optional[str] = Query(None, description="操作类型筛选（CREATE/UPDATE/DELETE/COVER）"),
     entity_type: Optional[str] = Query(None, description="实体类型筛选"),
     start_time: Optional[str] = Query(None, description="开始时间（ISO8601格式，如：2025-01-01T00:00:00）"),
     end_time: Optional[str] = Query(None, description="结束时间（ISO8601格式，如：2025-01-31T23:59:59）"),
@@ -80,10 +80,10 @@ async def get_audit_logs(
                 )
         
         # 验证操作类型
-        if operation_type and operation_type not in ["CREATE", "UPDATE", "DELETE"]:
+        if operation_type and operation_type not in ["CREATE", "UPDATE", "DELETE", "COVER"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="无效的操作类型，必须是 CREATE、UPDATE 或 DELETE"
+                detail="无效的操作类型，必须是 CREATE、UPDATE、DELETE 或 COVER"
             )
         
         # 查询日志

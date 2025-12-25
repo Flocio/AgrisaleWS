@@ -211,6 +211,8 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
         return Colors.blue;
       case OperationType.delete:
         return Colors.red;
+      case OperationType.cover:
+        return Colors.purple;
     }
   }
   
@@ -485,7 +487,7 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
                         ),
                       ),
                       SizedBox(width: 6),
-                      // 操作类型标签（创建/修改/删除）
+                      // 操作类型标签（创建/修改/删除/覆盖）
                       Container(
                         padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
@@ -550,11 +552,10 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
               if (log.note != null && log.note!.isNotEmpty) ...[
                 SizedBox(height: 4),
                 Text(
-                  '备注: ${log.note}',
+                  log.note!,
                   style: TextStyle(
                     fontSize: 12,
-                    color: Colors.grey[500],
-                    fontStyle: FontStyle.italic,
+                    color: Colors.grey[600],
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -741,7 +742,7 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
 
   Future<void> _showOperationTypePicker() async {
     final options = ['全部', ...OperationType.values.map((e) => e.displayName)];
-    final currentIndex = _operationType != null
+    int currentIndex = _operationType != null
         ? OperationType.values.indexOf(_operationType!) + 1
         : 0;
 
@@ -915,7 +916,33 @@ class _LogDetailDialog extends StatelessWidget {
         return Colors.blue;
       case OperationType.delete:
         return Colors.red;
+      case OperationType.cover:
+        return Colors.purple;
     }
+  }
+
+  String _getOldDataTitle(AuditLog log) {
+    if (log.operationType == OperationType.cover) {
+      // 根据 entityName 判断是"备份恢复"还是"数据导入"
+      if (log.entityName == '备份恢复') {
+        return '恢复前数据';
+      } else {
+        return '导入前数据';
+      }
+    }
+    return '修改前数据';
+  }
+
+  String _getNewDataTitle(AuditLog log) {
+    if (log.operationType == OperationType.cover) {
+      // 根据 entityName 判断是"备份恢复"还是"数据导入"
+      if (log.entityName == '备份恢复') {
+        return '恢复后数据';
+      } else {
+        return '导入后数据';
+      }
+    }
+    return '修改后数据';
   }
 
   Widget _buildDataTable(Map<String, dynamic>? data, String title) {
@@ -1176,15 +1203,17 @@ class _LogDetailDialog extends StatelessWidget {
                     if (log.operationType == OperationType.update)
                       _buildChangesTable(),
                     
-                    // 旧数据（UPDATE和DELETE操作）
+                    // 旧数据（UPDATE、DELETE和COVER操作）
                     if (log.operationType == OperationType.update ||
-                        log.operationType == OperationType.delete)
-                      _buildDataTable(log.oldData, '修改前数据'),
+                        log.operationType == OperationType.delete ||
+                        log.operationType == OperationType.cover)
+                      _buildDataTable(log.oldData, _getOldDataTitle(log)),
                     
-                    // 新数据（CREATE和UPDATE操作）
+                    // 新数据（CREATE、UPDATE和COVER操作）
                     if (log.operationType == OperationType.create ||
-                        log.operationType == OperationType.update)
-                      _buildDataTable(log.newData, '修改后数据'),
+                        log.operationType == OperationType.update ||
+                        log.operationType == OperationType.cover)
+                      _buildDataTable(log.newData, _getNewDataTitle(log)),
                   ],
                 ),
               ),

@@ -592,7 +592,20 @@ class IncomeRepository {
 
       // 记录操作日志
       try {
-        final entityName = '进账记录 (金额: ¥${income.amount})';
+        // 获取客户名称用于日志显示
+        String customerName = '未知客户';
+        if (income.customerId != null) {
+          final customerResult = await db.query(
+            'customers',
+            columns: ['name'],
+            where: 'id = ?',
+            whereArgs: [income.customerId],
+          );
+          if (customerResult.isNotEmpty) {
+            customerName = customerResult.first['name'] as String;
+          }
+        }
+        final entityName = '$customerName (金额: ¥${income.amount})';
         await LocalAuditLogService().logCreate(
           entityType: EntityType.income,
           entityId: id,
@@ -763,7 +776,20 @@ class IncomeRepository {
       // 记录操作日志
       try {
         final current = currentResult.first;
-        final entityName = '进账记录 (金额: ¥${updatedIncome.amount})';
+        // 获取客户名称用于日志显示
+        String customerName = '未知客户';
+        if (updatedIncome.customerId != null) {
+          final customerResult = await db.query(
+            'customers',
+            columns: ['name'],
+            where: 'id = ?',
+            whereArgs: [updatedIncome.customerId],
+          );
+          if (customerResult.isNotEmpty) {
+            customerName = customerResult.first['name'] as String;
+          }
+        }
+        final entityName = '$customerName (金额: ¥${updatedIncome.amount})';
         final oldData = {
           'id': current['id'],
           'userId': current['userId'],
@@ -875,7 +901,21 @@ class IncomeRepository {
       
       final incomeRow = income.first;
       final amount = (incomeRow['amount'] as num?)?.toDouble() ?? 0.0;
-      final entityName = '进账记录 (金额: ¥$amount)';
+      final customerId = incomeRow['customerId'] as int?;
+      // 获取客户名称用于日志显示
+      String customerName = '未知客户';
+      if (customerId != null) {
+        final customerResult = await db.query(
+          'customers',
+          columns: ['name'],
+          where: 'id = ?',
+          whereArgs: [customerId],
+        );
+        if (customerResult.isNotEmpty) {
+          customerName = customerResult.first['name'] as String;
+        }
+      }
+      final entityName = '$customerName (金额: ¥$amount)';
       final oldData = {
         'id': incomeRow['id'],
         'userId': incomeRow['userId'],
