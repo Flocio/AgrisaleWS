@@ -202,7 +202,7 @@ async def health_check():
             content={
                 "status": "healthy",
                 "database": "connected",
-                "version": "1.0.0"
+                "version": "1.1.0"
             }
         )
     except Exception as e:

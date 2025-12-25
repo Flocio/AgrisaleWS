@@ -16,7 +16,7 @@ class AppVersion {
   /// 格式：主版本号.次版本号.修订号（例如：1.1.0）
   /// 
   /// ⚠️ 重要：修改版本号时，只需修改此处的值，然后同步到 pubspec.yaml
-  static const String version = '1.0.0';
+  static const String version = '1.1.0';
   
   /// 版本号前缀（用于显示，例如：v1.1.0）
   static String get versionWithPrefix => 'v$version';
